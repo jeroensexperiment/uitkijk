@@ -1,5 +1,3 @@
-build_from:
-  amd64: python:3.11-slim-bookworm
 args:
   # repository and branch (or tag) that the app is built from
   UITKIJK_REPO: https://github.com/lexi1986/uitkijk.git
