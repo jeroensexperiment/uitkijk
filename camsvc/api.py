@@ -15,7 +15,7 @@ import urllib.request
 from fastapi import Body, FastAPI, HTTPException, Request, WebSocket
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 
-from . import __version__
+from . import __version__, supervisor
 from .config import EDITABLE, validate_settings
 from .motion import draw_mask_overlay, validate_mask, validate_zones
 from .summary import compare_ai, parse_day, summarize_day
@@ -53,8 +53,8 @@ def create_app(svc: "Service") -> FastAPI:
         return client_host in ("127.0.0.1", "::1") and "x-forwarded-for" not in headers
 
     def logged_in(request: Request) -> bool:
-        return (svc.auth is None or direct_local(request.client.host if request.client else None,
-                                                 request.headers)
+        host = request.client.host if request.client else None
+        return (svc.auth is None or direct_local(host, request.headers) or supervisor.via_ingress(host)
                 or svc.auth.session_ok(request.cookies.get(COOKIE)))
 
     @app.middleware("http")
@@ -151,10 +151,10 @@ def create_app(svc: "Service") -> FastAPI:
     def manifest():
         """For 'Add to Home Screen': own icon, dark background, no browser bar."""
         return JSONResponse({
-            "name": "Uitkijk", "short_name": "Uitkijk", "start_url": "/", "display": "standalone",
+            "name": "Uitkijk", "short_name": "Uitkijk", "start_url": "./", "display": "standalone",
             "background_color": "#090e18", "theme_color": "#090e18", "lang": "en",
-            "icons": [{"src": "/icon-180.png", "sizes": "180x180", "type": "image/png"},
-                      {"src": "/icon-512.png", "sizes": "512x512", "type": "image/png"}]})
+            "icons": [{"src": "icon-180.png", "sizes": "180x180", "type": "image/png"},
+                      {"src": "icon-512.png", "sizes": "512x512", "type": "image/png"}]})
 
     @app.get("/icon-{size}.png", include_in_schema=False)
     def icon(size: int):
@@ -174,7 +174,7 @@ def create_app(svc: "Service") -> FastAPI:
                  "motion": c.motion_active, "event_active": c.event is not None,
                  "detect": c.detect_enabled, "record": c.record_enabled,
                  "loitering": c.loitering, "face": c.face_name if c.faces else None,
-                 "live": f"/live/stream.html?src={urllib.parse.quote(c.cfg.live_stream)}"
+                 "live": f"live/stream.html?src={urllib.parse.quote(c.cfg.live_stream)}"
                          f"&mode={urllib.parse.quote(c.cfg.live_mode, safe=',')}"
                  if svc.cfg.go2rtc_url and c.cfg.live_stream else None}
                 for c in svc.cameras.values()]
@@ -403,6 +403,7 @@ def create_app(svc: "Service") -> FastAPI:
         src = ws.query_params.get("src", "")
         if svc.auth is not None and not (
                 direct_local(ws.client.host if ws.client else None, ws.headers)
+                or supervisor.via_ingress(ws.client.host if ws.client else None)
                 or svc.auth.session_ok(ws.cookies.get(COOKIE))):
             await ws.close(code=1008)
             return

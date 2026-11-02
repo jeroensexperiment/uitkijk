@@ -61,6 +61,12 @@ the web page; all other options are listed in [`config.example.yaml`](config.exa
 git pull && docker compose up -d --build
 ```
 
+### As a Home Assistant app
+
+On Home Assistant OS (Intel/AMD) Uitkijk can run as an app (add-on), with the page in the HA sidebar,
+MQTT filled in by itself and Google Coral support: add this repository under Settings → Apps → App
+store → Repositories. See [`homeassistant/app/DOCS.md`](homeassistant/app/DOCS.md).
+
 ### Without Docker (Proxmox container)
 
 There is also a script that creates a Debian container on Proxmox and installs everything, see

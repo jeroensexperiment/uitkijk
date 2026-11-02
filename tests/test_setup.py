@@ -69,3 +69,20 @@ def test_setup_api_needs_code(tmp_path, monkeypatch):
     assert load_config(tmp_path / "config.yaml").cameras[0].name == "hek"
     assert not (tmp_path / "state" / "setup_code").exists()
     assert (tmp_path / "config.yaml").stat().st_mode & 0o077 == 0
+
+
+def test_setup_via_ha_sidebar_needs_no_code(tmp_path, monkeypatch):
+    app = create_setup_app(tmp_path / "config.yaml", tmp_path / "state", "test")
+    monkeypatch.setenv("SUPERVISOR_TOKEN", "x")
+    monkeypatch.setattr("camsvc.supervisor._get", lambda path: {
+        "/services/mqtt": {"host": "core-mosquitto", "port": 1883, "username": "u", "password": "p"},
+        "/network/info": {"interfaces": [{"primary": True, "ipv4": {"address": ["192.168.1.20/24"]}}]},
+    }[path])
+    ingress = TestClient(app, client=("172.30.32.2", 50000))
+    assert ingress.post("/api/setup/check").status_code == 200
+    info = ingress.get("/api/setup/info").json()
+    assert info["mqtt"]["host"] == "core-mosquitto" and info["public_url"] == "http://192.168.1.20:8080"
+    # from the home network the code is still needed and the MQTT login stays hidden
+    lan = TestClient(app)
+    assert lan.post("/api/setup/check").status_code == 401
+    assert lan.get("/api/setup/info").json()["mqtt"] is None

@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#090e18">
-  <link rel="apple-touch-icon" href="/icon-180.png">
+  <link rel="apple-touch-icon" href="icon-180.png">
   <title>Uitkijk – setup</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -179,15 +179,21 @@
     $("codeGo").onclick = async () => {
       code = $("code").value.trim().toUpperCase();
       try {
-        await call("/api/setup/check");
-        const info = await fetch("/api/setup/info").then((r) => r.json());
+        await call("api/setup/check");
+        const info = await fetch("api/setup/info").then((r) => r.json());
         brands = info.brands;
         $("pubUrl").value = info.public_url;
+        if (info.mqtt) {   // HA app: login of the Mosquitto app
+          $("mqttHost").value = info.mqtt.host; $("mqttPort").value = info.mqtt.port;
+          $("mqttUser").value = info.mqtt.username; $("mqttPass").value = info.mqtt.password;
+        }
         $("codeCard").hidden = true; $("wizard").hidden = false;
         camCard();
       } catch (e) { show($("codeRes"), false, e.message); }
     };
     $("code").addEventListener("keydown", (e) => { if (e.key === "Enter") $("codeGo").click(); });
+    // via the Home Assistant sidebar no setup code is needed
+    fetch("api/setup/check", { method: "POST" }).then((r) => { if (r.ok) $("codeGo").click(); }).catch(() => {});
     $("addCam").onclick = camCard;
     $("fPlates").onchange = () => document.querySelectorAll("[data-plates]").forEach((x) => { x.hidden = !$("fPlates").checked; });
     $("fLive").onchange = () => { $("goRow").hidden = !$("fLive").checked; };
@@ -200,7 +206,7 @@
       const res = el.querySelector("[data-res]"), prev = el.querySelector("[data-prev]");
       btn.disabled = true; btn.textContent = "Testing…"; prev.style.display = "none";
       try {
-        const r = await call("/api/setup/test-camera", camData(el));
+        const r = await call("api/setup/test-camera", camData(el));
         if (r.ok) {
           const sub = r.sub ? (r.sub.ok ? ` · low quality ${r.sub.width}×${r.sub.height}` : " · low quality does not work; the high one will be used") : "";
           show(res, true, `Works: ${r.width}×${r.height} (${r.codec})${sub}`);
@@ -212,7 +218,7 @@
 
     $("mqttTest").onclick = async () => {
       try {
-        const r = await call("/api/setup/test-mqtt", { host: $("mqttHost").value.trim(), port: Number($("mqttPort").value), username: $("mqttUser").value, password: $("mqttPass").value });
+        const r = await call("api/setup/test-mqtt", { host: $("mqttHost").value.trim(), port: Number($("mqttPort").value), username: $("mqttUser").value, password: $("mqttPass").value });
         show($("mqttRes"), r.ok, r.ok ? "Connected to the MQTT server" : `Failed: ${r.error}`);
       } catch (e) { show($("mqttRes"), false, e.message); }
     };
@@ -229,13 +235,13 @@
       };
       $("save").disabled = true;
       try {
-        const r = await call("/api/setup/save", body);
+        const r = await call("api/setup/save", body);
         show($("saveRes"), true, r.auth
           ? `Saved. The service restarts. Then open ${r.public_url} and pair your passkey with the code from the log.`
           : "Saved. The service restarts; this page continues by itself in a moment…");
         if (!r.auth) {
           const wait = async () => {
-            try { const s = await fetch("/api/status", { cache: "no-store" }); if (s.ok) { location.href = "/"; return; } } catch {}
+            try { const s = await fetch("api/status", { cache: "no-store" }); if (s.ok) { location.href = "./"; return; } } catch {}
             setTimeout(wait, 2000);
           };
           setTimeout(wait, 4000);

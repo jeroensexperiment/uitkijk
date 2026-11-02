@@ -6,6 +6,7 @@ Global settings are at the top; per camera you can override anything under `defa
 from __future__ import annotations
 
 import copy
+import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -252,7 +253,8 @@ def load_config(path: str | Path) -> Config:
     }
     model = {
         "path": "/opt/camera-service/models/yolo11n.onnx",
-        "coral_path": None,  # .tflite for the Coral; without a Coral `path` is used
+        # .tflite for the Coral; without a Coral `path` is used (the HA app sets the environment variable)
+        "coral_path": os.environ.get("CAMSVC_CORAL_MODEL") or None,
         "device": "AUTO",   # AUTO = GPU first, otherwise CPU
         "input_size": 320,
         **raw.get("model", {}),

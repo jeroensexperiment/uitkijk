@@ -4,8 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#090e18">
-  <link rel="manifest" href="/manifest.json">
-  <link rel="apple-touch-icon" href="/icon-180.png">
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="icon-180.png">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="Uitkijk">
@@ -522,7 +522,7 @@
 
     async function api(path) {
       const r = await fetch(path, { cache: "no-store" });
-      if (r.status === 401) { location.href = `/login?next=${encodeURIComponent(location.pathname + location.search)}`; throw new Error(401); }
+      if (r.status === 401) { location.href = `login?next=${encodeURIComponent(location.pathname + location.search)}`; throw new Error(401); }
       if (!r.ok) throw new Error(r.status);
       return r.json();
     }
@@ -562,7 +562,7 @@
     function refreshFrames() {
       // load first, then swap: no flicker
       document.querySelectorAll("[data-frame]").forEach((el) => {
-        const url = `/api/cameras/${encodeURIComponent(el.dataset.frame)}/frame.jpg?t=${Date.now()}`;
+        const url = `api/cameras/${encodeURIComponent(el.dataset.frame)}/frame.jpg?t=${Date.now()}`;
         const img = new Image();
         img.onload = () => { frames[el.dataset.frame] = url; el.style.backgroundImage = `url("${url}")`; };
         img.src = url;
@@ -586,7 +586,7 @@
     }
     async function loadStatus() {
       try {
-        const [cams, st] = await Promise.all([api("/api/cameras"), api("/api/status")]);
+        const [cams, st] = await Promise.all([api("api/cameras"), api("api/status")]);
         $("banner").classList.remove("show");
         const first = !state.cams.length;
         state.cams = cams;
@@ -620,7 +620,7 @@
       if (state.q) p.set("q", state.q);
       if (state.day) p.set("day", state.day);
       if (state.important) p.set("important", "true");
-      return `/api/events?${p}`;
+      return `api/events?${p}`;
     }
     async function loadEvents(reset = true) {
       try {
@@ -644,7 +644,7 @@
     }
     async function renderKeys() {
       let list = [];
-      try { list = (await api("/api/auth/credentials")).credentials; } catch {}
+      try { list = (await api("api/auth/credentials")).credentials; } catch {}
       $("keysList").innerHTML = list.length ? list.map((c) => `
         <div class="person"><h3><span>${esc(c.name)} <span class="muted" style="font-size:.78rem;font-weight:500;margin-left:.35rem">since ${esc(c.created)} · last used ${esc(c.last_used)}</span></span>
           <button class="link-red" data-key-del="${esc(c.id)}">Remove</button></h3></div>`).join("")
@@ -654,26 +654,26 @@
       const name = (prompt("Name of this device:", /iPhone/.test(navigator.userAgent) ? "iPhone" : "MacBook") || "").trim();
       if (!name) return;
       try {
-        const { challenge_id, options: o } = await postJSON("/api/auth/register/options");
+        const { challenge_id, options: o } = await postJSON("api/auth/register/options");
         o.challenge = unb64(o.challenge); o.user.id = unb64(o.user.id);
         o.excludeCredentials = (o.excludeCredentials || []).map((c) => ({ ...c, id: unb64(c.id) }));
         const c = await navigator.credentials.create({ publicKey: o });
         const response = { clientDataJSON: b64(c.response.clientDataJSON), attestationObject: b64(c.response.attestationObject),
                            transports: c.response.getTransports ? c.response.getTransports() : [] };
-        await postJSON("/api/auth/register", { challenge_id, name,
+        await postJSON("api/auth/register", { challenge_id, name,
           credential: { id: c.id, rawId: b64(c.rawId), type: c.type, response, clientExtensionResults: c.getClientExtensionResults() } });
         renderKeys();
       } catch (e) { if (e.name !== "NotAllowedError") alert(e.message); }
     };
-    $("keysLogout").onclick = async () => { await postJSON("/api/auth/logout"); location.href = "/login"; };
+    $("keysLogout").onclick = async () => { await postJSON("api/auth/logout"); location.href = "login"; };
     $("keysLogoutAll").onclick = async () => {
       if (!confirm("Log out all devices? You will have to log in again everywhere with your passkey.")) return;
-      await postJSON("/api/auth/logout-all"); location.href = "/login";
+      await postJSON("api/auth/logout-all"); location.href = "login";
     };
     $("keysList").addEventListener("click", async (ev) => {
       const del = ev.target.closest("[data-key-del]");
       if (!del || !confirm("Remove this passkey? That device will no longer be able to log in.")) return;
-      await fetch(`/api/auth/credentials/${encodeURIComponent(del.dataset.keyDel)}`, { method: "DELETE" });
+      await fetch(`api/auth/credentials/${encodeURIComponent(del.dataset.keyDel)}`, { method: "DELETE" });
       renderKeys();
     });
 
@@ -691,7 +691,7 @@
       const el = $("summary");
       if (!state.day) { el.innerHTML = ""; return; }
       let s;
-      try { s = await api(`/api/summary?day=${state.day}`); } catch { el.innerHTML = ""; return; }
+      try { s = await api(`api/summary?day=${state.day}`); } catch { el.innerHTML = ""; return; }
       const known = Object.keys(s.people).length;
       const stat = (n, label) => `<div class="stat"><b>${n}</b><span>${label}</span></div>`;
       el.innerHTML = `
@@ -735,7 +735,7 @@
           lastDay = key;
         }
         const l = LABELS[e.label] || LABELS.motion;
-        const snap = e.snapshot ? `style="background-image:url('/clips/${encodeURI(e.snapshot)}')"` : "";
+        const snap = e.snapshot ? `style="background-image:url('clips/${encodeURI(e.snapshot)}')"` : "";
         const names = [knownNames(e), ...(e.plates || []).map((p) => state.plates.known[p.plate] || p.plate)].filter(Boolean).join(", ");
         html += `<button class="ev${e.false_alarm ? " false-alarm" : ""}" data-i="${i}">
           <div class="thumb" ${snap}><span class="badge l-${esc(e.label)}">${l.name}</span>${e.false_alarm ? `<span class="badge warn false-alarm">${e.false_alarm === "ai" ? "Probably nothing" : "Nothing"}</span>` : ""}<span class="dur">${fmtDur(e.duration)}</span></div>
@@ -763,8 +763,8 @@
         + (e.false_alarm === "ai" ? " · probably nothing: the AI saw no one" : e.false_alarm ? " · marked as nothing to worry about" : "");
       $("pFalse").textContent = e.false_alarm ? "Important after all" : "Nothing to worry about";
       const v = $("pVideo");
-      v.poster = e.snapshot ? `/clips/${encodeURI(e.snapshot)}` : "";
-      v.src = `/clips/${encodeURI(e.clip)}`;
+      v.poster = e.snapshot ? `clips/${encodeURI(e.snapshot)}` : "";
+      v.src = `clips/${encodeURI(e.clip)}`;
       v.play().catch(() => {});
       $("pDownload").href = v.src;
       $("pDownload").download = `${e.camera}_${e.clip.split("/").pop()}`;
@@ -790,7 +790,7 @@
     // ---------- faces ----------
     const knownNames = (e) => [...new Set((e.faces || []).map((f) => f.name).filter(Boolean))].join(", ");
     async function loadFaces() {
-      try { state.faces = await api("/api/faces"); } catch {}
+      try { state.faces = await api("api/faces"); } catch {}
     }
     function renderFaces(e) {
       const el = $("pFaces");
@@ -798,7 +798,7 @@
       const names = Object.keys(state.faces.people);
       el.innerHTML = e.faces.map((f, k) => `
         <div class="face${f.name ? " known" : ""}">
-          <img src="/clips/${encodeURI(f.crop)}" alt="">
+          <img src="clips/${encodeURI(f.crop)}" alt="">
           <span class="nm">${f.name ? esc(f.name) : "Unknown"}</span>
           <select data-face="${k}" aria-label="Who is this?">
             <option value="">${f.name ? "Someone else…" : "Who is this?"}</option>
@@ -811,7 +811,7 @@
       const e = state.items[state.current];
       const f = e?.faces?.[k];
       if (!f) return;
-      const r = await fetch(`/api/faces/${encodeURIComponent(name)}`, {
+      const r = await fetch(`api/faces/${encodeURIComponent(name)}`, {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ crop: f.crop }),
       });
       if (!r.ok) { alert((await r.json().catch(() => ({}))).detail || "Saving failed"); return; }
@@ -833,7 +833,7 @@
       return `<h4>Unknown faces</h4>
         <div class="unknowns">${unknownGroups.slice(0, 40).map((g, k) => `
           <div class="ugroup">
-            <div class="samples">${g.samples.map((id) => `<img src="/api/unknown-faces/${id}.jpg" alt="" loading="lazy">`).join("")}</div>
+            <div class="samples">${g.samples.map((id) => `<img src="api/unknown-faces/${id}.jpg" alt="" loading="lazy">`).join("")}</div>
             <div class="meta"><b>Seen ${g.count}×</b> · ${g.first.slice(0, 10) === g.last.slice(0, 10) ? `${fmtDay(g.last)} ${fmtTime(g.last)}` : `${fmtDay(g.first)} – ${fmtDay(g.last)}`} · ${g.cameras.map((c) => esc(camName(c))).join(", ")}
               ${g.suggest ? `<br><span class="hint">Looks like ${esc(g.suggest)}</span>` : ""}</div>
             <div class="row">
@@ -846,11 +846,11 @@
     }
     async function renderPeople() {
       if (state.faces.enabled) {
-        try { unknownGroups = (await api("/api/unknown-faces")).groups; } catch { unknownGroups = []; }
+        try { unknownGroups = (await api("api/unknown-faces")).groups; } catch { unknownGroups = []; }
       }
       const people = Object.entries(state.faces.people);
       const auto = state.faces.auto || {};
-      const sample = (name, id, isAuto) => `<div class="sample${isAuto ? " auto" : ""}"><img src="/api/faces/${encodeURIComponent(name)}/${isAuto ? "auto/" : ""}${id}.jpg" alt="">
+      const sample = (name, id, isAuto) => `<div class="sample${isAuto ? " auto" : ""}"><img src="api/faces/${encodeURIComponent(name)}/${isAuto ? "auto/" : ""}${id}.jpg" alt="">
             <button data-del="${esc(name)}|${isAuto ? "auto/" : ""}${id}" aria-label="Remove photo">✕</button></div>`;
       $("people").innerHTML = renderUnknown() + (people.length ? people.map(([name, ids]) => {
         const autos = auto[name] || [];
@@ -872,7 +872,7 @@
     async function assignUnknown(k, name) {
       const g = unknownGroups[k];
       if (!g || !name) return;
-      const data = await postUnknown("/api/unknown-faces/assign", { ids: g.ids, name });
+      const data = await postUnknown("api/unknown-faces/assign", { ids: g.ids, name });
       if (!data) return;
       renderPeople(); renderChips(); state.items = []; loadEvents(); loadStatus();
     }
@@ -910,7 +910,7 @@
     const PCT = { "motion.min_area": 100, "objects.min_score": 100 };
     const setState = { cam: null, schema: {} };
     async function openSettings(name) {
-      const data = await api(`/api/cameras/${encodeURIComponent(name)}/settings`);
+      const data = await api(`api/cameras/${encodeURIComponent(name)}/settings`);
       setState.cam = name; setState.schema = data.schema;
       $("setTitle").textContent = `Settings – ${camName(name)}`;
       $("setForm").innerHTML = SET_GROUPS.map(([title, paths]) => `<div><h4>${title}</h4>${paths.map((p) => {
@@ -928,7 +928,7 @@
         if (sc.type === "bool") body[p] = el.checked;
         else { const v = Number(el.value) / (PCT[p] || 1); body[p] = sc.type === "int" ? Math.round(v) : v; }
       });
-      const r = await fetch(`/api/cameras/${encodeURIComponent(setState.cam)}/settings`, {
+      const r = await fetch(`api/cameras/${encodeURIComponent(setState.cam)}/settings`, {
         method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
       });
       if (!r.ok) { alert((await r.json().catch(() => ({}))).detail || "Saving failed"); return; }
@@ -948,12 +948,12 @@
     async function openMask(name) {
       mask.cam = name; mask.draft = []; mask.mode = "mask";
       const enc = encodeURIComponent(name);
-      const [m, z] = await Promise.all([api(`/api/cameras/${enc}/mask`).catch(() => ({ mask: [] })),
-                                        api(`/api/cameras/${enc}/zones`).catch(() => ({ zones: [] }))]);
+      const [m, z] = await Promise.all([api(`api/cameras/${enc}/mask`).catch(() => ({ mask: [] })),
+                                        api(`api/cameras/${enc}/zones`).catch(() => ({ zones: [] }))]);
       mask.sets.mask = { polys: m.mask || [], names: [], dirty: false };
       mask.sets.zones = { polys: (z.zones || []).map((q) => q.points), names: (z.zones || []).map((q) => q.name), dirty: false };
       $("maskTitle").textContent = `Mask and zones – ${camName(name)}`;
-      $("mImg").src = `/api/cameras/${enc}/frame.jpg?t=${Date.now()}`;
+      $("mImg").src = `api/cameras/${enc}/frame.jpg?t=${Date.now()}`;
       setMode("mask");
       $("maskDlg").showModal();
     }
@@ -1035,7 +1035,7 @@
       if (mask.sets.mask.dirty) puts.push(["mask", { mask: mask.sets.mask.polys }]);
       if (mask.sets.zones.dirty) puts.push(["zones", { zones: mask.sets.zones.polys.map((p, i) => ({ name: mask.sets.zones.names[i], points: p })) }]);
       for (const [what, body] of puts) {
-        const r = await fetch(`/api/cameras/${enc}/${what}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+        const r = await fetch(`api/cameras/${enc}/${what}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
         if (!r.ok) { alert((await r.json().catch(() => ({}))).detail || "Saving failed"); return; }
         mask.sets[what].dirty = false;
       }
@@ -1078,9 +1078,9 @@
       if (!e) return;
       $("pFalse").disabled = true;
       try {
-        const r = await fetch("/api/events/false-alarm", { method: "POST", headers: { "Content-Type": "application/json" },
+        const r = await fetch("api/events/false-alarm", { method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ clip: e.clip, false_alarm: !e.false_alarm }) });
-        if (r.status === 401) { location.href = "/login"; return; }
+        if (r.status === 401) { location.href = "login"; return; }
         if (!r.ok) throw new Error(r.status);
         const res = await r.json();
         e.false_alarm = res.false_alarm;
@@ -1096,7 +1096,7 @@
       const el = $("cmpBody");
       el.innerHTML = '<div class="muted">Loading…</div>';
       let c;
-      try { c = await api("/api/ai-comparison?days=7"); } catch { el.innerHTML = '<div class="muted">Not available.</div>'; return; }
+      try { c = await api("api/ai-comparison?days=7"); } catch { el.innerHTML = '<div class="muted">Not available.</div>'; return; }
       const stat = (n, label) => `<div class="stat"><b>${n}</b><span>${label}</span></div>`;
       if (!c.events) {
         el.innerHTML = '<div class="empty"><h3>No comparison yet</h3>As soon as the external AI in Home Assistant judges a person, it shows up here next to the local verdict.</div>';
@@ -1112,7 +1112,7 @@
         </div>
         ${c.disagree.length ? '<span class="eyebrow">Disagree</span>' : ""}
         ${c.disagree.map((r) => `<div class="cmp-row">
-          ${r.snapshot ? `<img src="/clips/${encodeURI(r.snapshot)}" alt="" loading="lazy">` : "<div></div>"}
+          ${r.snapshot ? `<img src="clips/${encodeURI(r.snapshot)}" alt="" loading="lazy">` : "<div></div>"}
           <div class="txt"><span><b>${esc(camName(r.camera))} · ${dayLabel(new Date(r.start))} ${fmtTime(r.start)}</b></span>
             <span><b>External ${r.external ? "notifies" : "does not notify"}:</b> ${esc(r.external_text || "–")}</span>
             <span><b>Local ${r.local ? "sees it" : "sees nothing"}:</b> ${esc(r.local_text || "–")}</span></div>
@@ -1121,7 +1121,7 @@
 
     // ---------- licence plates ----------
     async function loadPlates() {
-      try { state.plates = await api("/api/plates"); } catch {}
+      try { state.plates = await api("api/plates"); } catch {}
     }
     function renderPlates(e) {
       const el = $("pPlates");
@@ -1129,7 +1129,7 @@
       el.innerHTML = e.plates.map((p) => {
         const name = state.plates.known[p.plate];
         return `<div class="plate">
-          ${p.crop ? `<img src="/clips/${encodeURI(p.crop)}" alt="">` : ""}
+          ${p.crop ? `<img src="clips/${encodeURI(p.crop)}" alt="">` : ""}
           <span class="plate-txt">${esc(p.plate)}</span>
           <span class="nm">${name ? esc(name) : "Unknown vehicle"}</span>
           ${state.plates.enabled ? `<button class="btn" data-plate-name="${esc(p.plate)}">${name ? "Rename" : "Give a name"}</button>` : ""}
@@ -1139,7 +1139,7 @@
     async function namePlate(plate) {
       const name = (prompt(`Name for ${plate} (e.g. Our car, Grandparents):`, state.plates.known[plate] || "") || "").trim();
       if (!name) return;
-      const r = await fetch(`/api/plates/${encodeURIComponent(plate)}`, {
+      const r = await fetch(`api/plates/${encodeURIComponent(plate)}`, {
         method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }),
       });
       if (!r.ok) { alert((await r.json().catch(() => ({}))).detail || "Saving failed"); return; }
@@ -1169,7 +1169,7 @@
           timer = setTimeout(() => {   // wait briefly: do not load a video on every mouse movement
             const v = document.createElement("video");
             v.muted = true; v.playsInline = true; v.loop = true; v.autoplay = true; v.preload = "auto";
-            v.src = `/clips/${encodeURI(e.clip)}#t=8`;   // ~10 s pre-buffer: start just before the detection
+            v.src = `clips/${encodeURI(e.clip)}#t=8`;   // ~10 s pre-buffer: start just before the detection
             thumb.prepend(v);
           }, 250);
         });
@@ -1221,7 +1221,7 @@
       const fp = ev.target.closest("[data-forget-plate]");
       if (fp) {
         if (confirm(`Forget ${fp.dataset.forgetPlate}?`)) {
-          fetch(`/api/plates/${encodeURIComponent(fp.dataset.forgetPlate)}`, { method: "DELETE" })
+          fetch(`api/plates/${encodeURIComponent(fp.dataset.forgetPlate)}`, { method: "DELETE" })
             .then((r) => r.json()).then((d) => { state.plates.known = d.known || {}; renderPlatesList(); renderChips(); renderTimeline(); loadStatus(); });
         }
         return;
@@ -1233,7 +1233,7 @@
       if (ev.target.closest("#openCompare")) { renderCompare(); $("cmpDlg").showModal(); return; }
       if (ev.target.closest("[data-close]")) { $("peopleDlg").close(); return; }
       const del = ev.target.closest("[data-del]");
-      if (del) { const [n, id] = del.dataset.del.split("|"); forget(`/api/faces/${encodeURIComponent(n)}/${id}`); return; }
+      if (del) { const [n, id] = del.dataset.del.split("|"); forget(`api/faces/${encodeURIComponent(n)}/${id}`); return; }
       const ua = ev.target.closest("[data-uassign]");
       if (ua) {
         const sel = document.querySelector(`[data-ugroup="${ua.dataset.uassign}"]`);
@@ -1245,11 +1245,11 @@
       const ud = ev.target.closest("[data-udismiss]");
       if (ud) {
         const g = unknownGroups[Number(ud.dataset.udismiss)];
-        if (g) postUnknown("/api/unknown-faces/dismiss", { ids: g.ids }).then((d) => d && renderPeople().then(loadStatus));
+        if (g) postUnknown("api/unknown-faces/dismiss", { ids: g.ids }).then((d) => d && renderPeople().then(loadStatus));
         return;
       }
       const fg = ev.target.closest("[data-forget]");
-      if (fg) { if (confirm(`Forget ${fg.dataset.forget} and all photos?`)) forget(`/api/faces/${encodeURIComponent(fg.dataset.forget)}`); return; }
+      if (fg) { if (confirm(`Forget ${fg.dataset.forget} and all photos?`)) forget(`api/faces/${encodeURIComponent(fg.dataset.forget)}`); return; }
       if (ev.target === $("peopleDlg")) { $("peopleDlg").close(); return; }
       const cam = ev.target.closest("[data-cam]");
       if (cam) {
@@ -1308,7 +1308,7 @@
     async function openClip(rel) {
       let i = state.items.findIndex((e) => e.clip === rel);
       if (i < 0) {
-        try { state.items.unshift(await api(`/clips/${encodeURI(rel.replace(/\.mp4$/, ".json"))}`)); i = 0; } catch { return; }
+        try { state.items.unshift(await api(`clips/${encodeURI(rel.replace(/\.mp4$/, ".json"))}`)); i = 0; } catch { return; }
       }
       openEvent(i);
     }
@@ -1328,7 +1328,7 @@
 
     // ---------- start and refresh ----------
     (async () => {
-      try { state.auth = await api("/api/auth/state"); } catch {}
+      try { state.auth = await api("api/auth/state"); } catch {}
       await Promise.all([loadFaces(), loadPlates()]);
       await loadStatus();
       renderChips();

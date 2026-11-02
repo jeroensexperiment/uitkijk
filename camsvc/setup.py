@@ -23,6 +23,8 @@ import yaml
 from fastapi import Body, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 
+from . import supervisor
+
 log = logging.getLogger(__name__)
 
 WEB_DIR = Path(__file__).parent / "web"
@@ -212,6 +214,8 @@ def create_setup_app(config_path: Path, state_dir: Path, reason: str):
     app = FastAPI(title="Uitkijk setup")
 
     def check(request: Request) -> None:
+        if supervisor.via_ingress(request.client.host if request.client else None):
+            return      # Home Assistant sidebar: HA has already logged the user in
         given = request.headers.get("x-setup-code", "")
         if not hmac.compare_digest(given.strip().upper().encode(), token.encode()):
             raise HTTPException(401, "Setup code is not correct (see the container log)")
@@ -234,9 +238,16 @@ def create_setup_app(config_path: Path, state_dir: Path, reason: str):
     @app.get("/api/setup/info")
     def info(request: Request):
         host = (request.headers.get("host") or "localhost:8080").split(",")[0]
+        if supervisor.in_app():
+            # via the HA sidebar the Host header is HA itself; links must point to this service
+            ip = supervisor.host_ip()
+            host = f"{ip}:{os.environ.get('CAMSVC_PORT', '8080')}" if ip else host
         return {"reason": reason, "brands": {k: {"name": v["name"], "port": v["port"],
                                                   "custom": not v["main"]} for k, v in BRANDS.items()},
-                "public_url": f"http://{host}"}
+                "public_url": f"http://{host}",
+                # only via the HA sidebar: it contains the MQTT login of the Mosquitto app
+                "mqtt": supervisor.mqtt_service() if supervisor.via_ingress(
+                    request.client.host if request.client else None) else None}
 
     @app.post("/api/setup/check")
     def check_code(request: Request):

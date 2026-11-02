@@ -1,0 +1,4 @@
+# Lets Home Assistant add this repository as an app (add-on) repository; the app is in homeassistant/app.
+name: Uitkijk
+url: https://github.com/lexi1986/uitkijk
+maintainer: lexi1986
