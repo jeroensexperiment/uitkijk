@@ -1,0 +1,34 @@
+# Uitkijk as a Home Assistant app (add-on). See DOCS.md in this folder.
+name: Uitkijk
+version: "0.1.0"
+slug: uitkijk
+description: Local camera system with recordings, detection (CPU or Google Coral) and face/plate recognition
+url: https://github.com/lexi1986/uitkijk
+arch:
+  - amd64
+startup: services
+boot: auto
+# RTSP cameras, go2rtc and links in notifications without port juggling (as in docker-compose.yml)
+host_network: true
+# the web page in the HA sidebar, behind the HA login
+ingress: true
+ingress_port: 8080
+panel_icon: mdi:cctv
+panel_title: Uitkijk
+webui: "http://[HOST]:[PORT:8080]/"
+watchdog: "tcp://[HOST]:[PORT:8080]"
+# login of the Mosquitto app and the IP address of this machine for the setup wizard
+services:
+  - mqtt:want
+hassio_api: true
+# Google Coral USB, and the Intel iGPU (/dev/dri) for hardware decoding
+usb: true
+video: true
+# recordings in /media/uitkijk: visible in the HA media browser and not part of the app backup
+map:
+  - media:rw
+# face models (~500 MB) are downloaded again when missing
+backup_exclude:
+  - "models/*"
+options: {}
+schema: {}
