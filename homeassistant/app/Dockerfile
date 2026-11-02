@@ -1,14 +1,15 @@
 # Uitkijk as a Home Assistant app: the same service as the main Dockerfile, plus go2rtc and the
 # Google Coral (driver, LiteRT and a YOLO11n model compiled for the Edge TPU).
-# Home Assistant builds this folder on its own, so the source comes from GitHub (UITKIJK_REF).
+# Home Assistant builds this folder on its own, so the source comes from GitHub (build.yaml).
 
 ARG BUILD_FROM=python:3.11-slim-bookworm
 
 # --- source ------------------------------------------------------------------------------------
 FROM python:3.11-slim-bookworm AS src
+ARG UITKIJK_REPO=https://github.com/lexi1986/uitkijk.git
 ARG UITKIJK_REF=main
 RUN apt-get update -qq && apt-get install -y -qq --no-install-recommends git ca-certificates \
- && git clone --depth 1 --branch "$UITKIJK_REF" https://github.com/lexi1986/uitkijk.git /src
+ && git clone --depth 1 --branch "$UITKIJK_REF" "$UITKIJK_REPO" /src
 
 # --- YOLO11n to ONNX (CPU) and to the Edge TPU (Coral) --------------------------------------
 FROM python:3.11-slim-bookworm AS model
