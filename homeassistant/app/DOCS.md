@@ -11,11 +11,13 @@ machine). What is different:
 - **Google Coral (USB)**: driver and model are included. Plug it in before starting the app; the log
   then says `Object model ... via TFLite on Edge TPU`. Without a Coral the CPU is used.
 - **go2rtc** for the live view runs inside the app.
-- **Configuration**: in Uitkijk under Manage → Configuration you edit the whole `config.yaml`; it is
-  checked before saving and the app then restarts by itself. The file is in
-  `/addon_configs/<id>_uitkijk/config.yaml`, so File editor or Studio Code Server can open it too
-  (restart the app after editing it there). Changed a camera password? Also adjust
-  `go2rtc/go2rtc.yaml` next to it for the live view.
+- **Configuration tab** of the app: add, change or remove cameras (brand, IP, login, Dahua sub
+  stream, faces, plates), storage and live view. Save and restart the app; masks and zones from the
+  Uitkijk page stay.
+- **Everything else** in Uitkijk under Manage → Configuration: the whole `config.yaml`, checked before
+  saving; the app then restarts by itself and the Configuration tab follows. The file is in
+  `/addon_configs/<id>_uitkijk/config.yaml` (File editor or Studio Code Server can open it too;
+  restart the app after editing it there).
 
 ## Install
 
