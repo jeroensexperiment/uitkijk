@@ -384,6 +384,7 @@ class Camera:
 
     def _sub_loop(self) -> None:
         backoff = 2.0
+        failures = 0
         while not self._stop.is_set():
             try:
                 with self._open_sub() as container:
@@ -391,9 +392,19 @@ class Camera:
                     stream.thread_type = "AUTO"
                     self._set_sub_online(True)
                     backoff = 2.0
+                    failures = 0
                     self._process_frames(container, stream)
             except Exception as exc:  # noqa: BLE001
                 log.warning("[%s] sub stream error: %s", self.name, exc)
+                failures += 1
+                if failures >= 3 and self.sub_url and self.sub_url != self.main_url:
+                    # a sub stream that does not work (disabled on the camera, wrong address):
+                    # detect on the main stream instead of staying offline (until a restart)
+                    log.warning("[%s] sub stream keeps failing; using the main stream for detection",
+                                self.name)
+                    self.sub_url = self.main_url
+                    backoff = 2.0
+                    continue
             self._set_sub_online(False)
             if self._stop.wait(backoff):
                 break

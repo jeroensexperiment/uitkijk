@@ -24,9 +24,11 @@ hassio_api: true
 # Google Coral USB, and the Intel iGPU (/dev/dri) for hardware decoding
 usb: true
 video: true
-# recordings in /media/uitkijk: visible in the HA media browser and not part of the app backup
+# recordings in /media/uitkijk: visible in the HA media browser and not part of the app backup;
+# config.yaml in /addon_configs/<id>_uitkijk, so File editor or Studio Code Server can open it too
 map:
   - media:rw
+  - addon_config:rw
 # face models (~500 MB) are downloaded again when missing
 backup_exclude:
   - "models/*"

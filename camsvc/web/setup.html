@@ -147,6 +147,7 @@
           <label>Port <input data-f="port" type="number"></label>
           <label>User <input data-f="username" autocomplete="off"></label>
           <label>Password <input data-f="password" type="password" autocomplete="new-password"></label>
+          <label data-subrow hidden>Low-quality stream (for detection) <select data-f="sub"></select></label>
         </div>
         <div class="grid" data-custom hidden>
           <label>RTSP address, high quality <input data-f="main_url" placeholder="rtsp://user:password@ip:554/..."></label>
@@ -162,6 +163,9 @@
         el.querySelector("[data-std]").hidden = b.custom;
         el.querySelector("[data-custom]").hidden = !b.custom;
         el.querySelector('[data-f="port"]').placeholder = b.port;
+        const subSel = el.querySelector('[data-f="sub"]');
+        subSel.innerHTML = Object.entries(b.subs || {}).map(([k, label]) => `<option value="${k}">${esc(label)}</option>`).join("");
+        el.querySelector("[data-subrow]").hidden = !b.subs;
       };
       sel.addEventListener("change", sync); sync();
       el.querySelector("[data-plates]").hidden = !$("fPlates").checked;
@@ -208,7 +212,7 @@
       try {
         const r = await call("api/setup/test-camera", camData(el));
         if (r.ok) {
-          const sub = r.sub ? (r.sub.ok ? ` · low quality ${r.sub.width}×${r.sub.height}` : " · low quality does not work; the high one will be used") : "";
+          const sub = r.sub ? (r.sub.ok ? ` · low quality ${r.sub.width}×${r.sub.height}` : ` · low quality does not work (${r.sub.error}); the high one will be used for detection`) : "";
           show(res, true, `Works: ${r.width}×${r.height} (${r.codec})${sub}`);
           prev.src = r.preview; prev.style.display = "block";
         } else show(res, false, r.error);

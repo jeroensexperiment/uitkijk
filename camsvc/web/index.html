@@ -276,6 +276,7 @@
     .seg button { font: inherit; font-size: .8rem; font-weight: 500; padding: .3rem .85rem; border-radius: var(--me-radius-pill); color: var(--me-text-secondary); background: none; border: 0; }
     .seg button[aria-selected=true] { background: var(--me-primary); color: var(--me-bg); font-weight: 600; }
     .m-draft { fill: var(--me-primary-soft); stroke: var(--me-primary); stroke-width: 2; stroke-dasharray: 6 4; }
+    .config-text { width: 100%; min-height: min(60dvh, 640px); resize: vertical; padding: .75rem; font: .8rem/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: var(--me-text); background: var(--me-bg); border: 1px solid var(--me-border); border-radius: var(--me-radius-md); tab-size: 2; }
     .btn.primary { background: var(--me-primary); border-color: var(--me-primary); color: var(--me-bg); font-weight: 600; }
     .btn.primary:hover:not(:disabled) { background: var(--me-primary); box-shadow: var(--me-glow-subtle); }
 
@@ -441,6 +442,20 @@
       </button>
     </div>
     <div id="manageBody"></div>
+  </dialog>
+
+  <dialog id="configDlg" aria-labelledby="configTitle">
+    <div class="player-head">
+      <div><h3 id="configTitle">Configuration</h3><div class="muted" id="configPath">The whole configuration file. It is checked before saving; the service then restarts.</div></div>
+      <button class="icon-btn" data-dlg-close="configDlg" aria-label="Close">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </button>
+    </div>
+    <div class="people"><textarea class="config-text" id="configText" spellcheck="false" aria-label="Configuration file"></textarea></div>
+    <div class="player-foot">
+      <span class="mask-hint" id="configMsg">All options are listed in config.example.yaml.</span>
+      <div class="btns"><button class="btn primary" id="configSave">Save and restart</button></div>
+    </div>
   </dialog>
 
   <dialog id="cmpDlg" aria-labelledby="cmpTitle">
@@ -1191,8 +1206,9 @@
     // ---------- interaction ----------
     document.addEventListener("click", (ev) => {
       if (ev.target.closest("#openManage")) { renderManage(); $("manageDlg").showModal(); return; }
+      if (ev.target.closest("#openConfig")) { $("manageDlg").close(); openConfig(); return; }
       // opening another dialog from Manage: close Manage first
-      if ($("manageDlg").open && $("manageDlg").contains(ev.target) && ev.target.closest("[data-settings],[data-mask],#openCompare,#openKeys")) $("manageDlg").close();
+      if ($("manageDlg").open && $("manageDlg").contains(ev.target) && ev.target.closest("[data-settings],[data-mask],#openCompare,#openKeys,#openConfig")) $("manageDlg").close();
       if (ev.target.closest("#filterToggle")) {
         const f = document.querySelector(".filters"); f.classList.toggle("open");
         $("filterToggle").setAttribute("aria-expanded", String(f.classList.contains("open")));
@@ -1280,6 +1296,34 @@
     });
 
     // ---------- manage ----------
+    // ---------- configuration file ----------
+    async function openConfig() {
+      const msg = $("configMsg"), text = $("configText");
+      msg.textContent = "Loading…"; text.value = ""; $("configSave").disabled = true;
+      $("configDlg").showModal();
+      const r = await fetch("api/config", { cache: "no-store" });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) { msg.textContent = data.detail || "Not available"; return; }
+      text.value = data.yaml; $("configPath").textContent = `${data.path} · checked before saving; the service then restarts.`;
+      msg.textContent = "All options are listed in config.example.yaml."; $("configSave").disabled = false;
+    }
+    $("configSave").onclick = async () => {
+      const msg = $("configMsg"), btn = $("configSave");
+      btn.disabled = true; msg.textContent = "Checking…";
+      const r = await fetch("api/config", { method: "PUT", headers: { "Content-Type": "application/json" },
+                                            body: JSON.stringify({ yaml: $("configText").value }) });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) { msg.textContent = data.detail || "Not saved"; btn.disabled = false; return; }
+      msg.textContent = "Saved. Restarting…";
+      // wait until the service is back, then reload the page with the new cameras
+      await new Promise((ok) => setTimeout(ok, 3000));
+      for (let i = 0; i < 60; i++) {
+        try { if ((await fetch("api/status", { cache: "no-store" })).ok) { location.reload(); return; } } catch {}
+        await new Promise((ok) => setTimeout(ok, 2000));
+      }
+      msg.textContent = "The service does not come back; check the log.";
+    };
+
     function renderManage() {
       const st = state.status || {}, h = st.health || {}, ai = st.ai || {};
       const row = (k, v) => `<div class="manage-row"><span>${k}</span><b>${v}</b></div>`;
@@ -1300,6 +1344,7 @@
         </div>
         <div class="btns">
           ${ai.state && ai.state !== "off" ? '<button class="btn" id="openCompare">AI comparison</button>' : ""}
+          <button class="btn" id="openConfig">Configuration</button>
           ${state.auth?.enabled ? '<button class="btn" id="openKeys">Passkeys</button>' : ""}
         </div>`;
     }

@@ -31,7 +31,7 @@ RUN (yolo export model=yolo11n.pt format=edgetpu imgsz=320 \
 # fixed base: the Supervisor would otherwise use its own (Alpine) base image
 FROM python:3.11-slim-bookworm
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 \
-    CAMSVC_CONFIG=/data/config.yaml CAMSVC_STATE=/data/state CAMSVC_CLIPS=/media/uitkijk \
+    CAMSVC_CONFIG=/config/config.yaml CAMSVC_STATE=/data/state CAMSVC_CLIPS=/media/uitkijk \
     CAMSVC_MODEL=/data/models/yolo11n.onnx CAMSVC_BUNDLED_MODELS=/opt/camsvc-models \
     CAMSVC_CORAL_MODEL=/opt/camsvc-models/yolo11n_edgetpu.tflite HOME=/data
 ARG LIBEDGETPU=https://github.com/feranick/libedgetpu/releases/download/16.0TF2.19.1-1/libedgetpu1-std_16.0tf2.19.1-1.bookworm_amd64.deb

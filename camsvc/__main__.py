@@ -70,7 +70,8 @@ def main() -> None:
     svc = Service(cfg)
     svc.start()
 
-    server = uvicorn.Server(uvicorn.Config(create_app(svc), host=cfg.api_host, port=cfg.api_port,
+    app = create_app(svc, Path(args.config))
+    server = uvicorn.Server(uvicorn.Config(app, host=cfg.api_host, port=cfg.api_port,
                                            log_level="warning", access_log=False))
 
     def shutdown(*_):
@@ -85,7 +86,7 @@ def main() -> None:
         # Do not let the interpreter tear down: PyAV/ffmpeg decoder threads may still run while
         # their objects are gone (segfault on stop). Everything has been saved.
         logging.shutdown()
-        os._exit(0)
+        os._exit(3 if getattr(svc, "restart_requested", False) else 0)
 
 
 if __name__ == "__main__":

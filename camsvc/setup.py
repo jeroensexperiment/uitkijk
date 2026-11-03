@@ -43,7 +43,8 @@ BRANDS: dict[str, dict] = {
                   "sub": "rtsp://{auth}{ip}:{port}/Streaming/Channels/102"},
     "dahua": {"name": "Dahua / Amcrest / Lorex", "port": 554,
               "main": "rtsp://{auth}{ip}:{port}/cam/realmonitor?channel=1&subtype=0",
-              "sub": "rtsp://{auth}{ip}:{port}/cam/realmonitor?channel=1&subtype=1"},
+              "sub": "rtsp://{auth}{ip}:{port}/cam/realmonitor?channel=1&subtype={sub}",
+              "subs": {"1": "Sub stream 1", "2": "Sub stream 2", "3": "Sub stream 3"}},
     "tapo": {"name": "TP-Link Tapo / VIGI", "port": 554,
              "main": "rtsp://{auth}{ip}:{port}/stream1", "sub": "rtsp://{auth}{ip}:{port}/stream2"},
     "unifi": {"name": "UniFi Protect (RTSP link from Protect)", "port": 7447, "main": "", "sub": ""},
@@ -67,6 +68,11 @@ def camera_urls(cam: dict) -> tuple[str, str | None]:
     user, pw = str(cam.get("username") or ""), str(cam.get("password") or "")
     auth = (f"{urllib.parse.quote(user, safe='')}:{urllib.parse.quote(pw, safe='')}@" if user else "")
     fields = {"auth": auth, "ip": str(cam["ip"]).strip(), "port": int(cam.get("port") or brand["port"])}
+    if brand.get("subs"):
+        # brands with more than one low-quality stream (Dahua): the one chosen in the wizard
+        fields["sub"] = str(cam.get("sub") or next(iter(brand["subs"])))
+        if fields["sub"] not in brand["subs"]:
+            raise ValueError(f"Camera '{cam.get('name', '?')}': unknown low-quality stream")
     return brand["main"].format(**fields), brand["sub"].format(**fields)
 
 
@@ -242,8 +248,8 @@ def create_setup_app(config_path: Path, state_dir: Path, reason: str):
             # via the HA sidebar the Host header is HA itself; links must point to this service
             ip = supervisor.host_ip()
             host = f"{ip}:{os.environ.get('CAMSVC_PORT', '8080')}" if ip else host
-        return {"reason": reason, "brands": {k: {"name": v["name"], "port": v["port"],
-                                                  "custom": not v["main"]} for k, v in BRANDS.items()},
+        return {"reason": reason, "brands": {k: {"name": v["name"], "port": v["port"], "custom": not v["main"],
+                                                  "subs": v.get("subs")} for k, v in BRANDS.items()},
                 "public_url": f"http://{host}",
                 # only via the HA sidebar: it contains the MQTT login of the Mosquitto app
                 "mqtt": supervisor.mqtt_service() if supervisor.via_ingress(

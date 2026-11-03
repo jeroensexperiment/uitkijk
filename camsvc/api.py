@@ -35,7 +35,7 @@ if TYPE_CHECKING:
 PUBLIC_PATHS = ("/login", "/manifest.json", "/icon-180.png", "/icon-512.png")
 
 
-def create_app(svc: "Service") -> FastAPI:
+def create_app(svc: "Service", config_path: Path | None = None) -> FastAPI:
     app = FastAPI(title="camera-service", version=__version__, docs_url="/docs", redoc_url=None)
     clips_root = svc.cfg.clips_dir.resolve()
 
@@ -549,6 +549,56 @@ def create_app(svc: "Service") -> FastAPI:
             raise HTTPException(404, "Not found")
         media = {".mp4": "video/mp4", ".jpg": "image/jpeg", ".json": "application/json"}[target.suffix]
         return FileResponse(target, media_type=media)
+
+    # --- configuration file (editor on the web page) ------------------------
+    def config_editable(request: Request) -> None:
+        """The file holds camera and MQTT passwords: only via the HA sidebar, from the server itself
+        or after logging in with a passkey, never just from the home network."""
+        host = request.client.host if request.client else None
+        if config_path is None:
+            raise HTTPException(404, "Not available")
+        if not (supervisor.via_ingress(host) or direct_local(host, request.headers)
+                or (svc.auth is not None and svc.auth.session_ok(request.cookies.get(COOKIE)))):
+            raise HTTPException(403, "The configuration can only be edited via the Home Assistant sidebar "
+                                     "or after logging in with a passkey")
+
+    @app.get("/api/config")
+    def get_config(request: Request):
+        config_editable(request)
+        return {"yaml": config_path.read_text(encoding="utf-8"), "path": str(config_path)}
+
+    @app.put("/api/config")
+    def put_config(request: Request, payload: dict = Body(...)):
+        """Check the new file by loading it as the service would; save and restart only when it loads."""
+        import os
+        import signal
+        import threading
+
+        import yaml
+
+        from .config import load_config
+        config_editable(request)
+        text = payload.get("yaml")
+        if not isinstance(text, str) or not text.strip():
+            raise HTTPException(400, "Empty configuration")
+        tmp = config_path.with_suffix(".yaml.new")
+        tmp.write_text(text, encoding="utf-8")
+        tmp.chmod(0o600)
+        try:
+            if not isinstance(yaml.safe_load(text), dict):
+                raise ValueError("The file must contain settings (key: value)")
+            load_config(tmp)
+        except (ValueError, KeyError, TypeError, yaml.YAMLError) as exc:
+            tmp.unlink(missing_ok=True)
+            raise HTTPException(400, f"Not saved: {exc}") from exc
+        config_path.replace(config_path.with_suffix(".yaml.previous"))
+        tmp.replace(config_path)
+        log.warning("Configuration changed from the web page; restarting")
+        # stop neatly (recordings closed); __main__ exits with code 3 so Docker, systemd or the
+        # HA app starts the service again
+        svc.restart_requested = True
+        threading.Timer(1.0, os.kill, (os.getpid(), signal.SIGTERM)).start()
+        return {"ok": True}
 
     return app
 
