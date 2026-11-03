@@ -9,7 +9,10 @@ if [ ! -f /config/config.yaml ] && [ -f /data/config.yaml ]; then
   echo "Configuration moved to /addon_configs (config.yaml)"
 fi
 
-# go2rtc for the live view; the setup wizard writes /config/go2rtc/go2rtc.yaml
+# the Configuration tab into config.yaml and go2rtc.yaml before go2rtc reads them
+python -m camsvc.ha_options
+
+# go2rtc for the live view (streams from the Configuration tab or the setup wizard)
 (cd /config/go2rtc && while true; do go2rtc -config /config/go2rtc/go2rtc.yaml; sleep 5; done) &
 
 # After saving the wizard or the configuration editor the service stops with code 3 to start

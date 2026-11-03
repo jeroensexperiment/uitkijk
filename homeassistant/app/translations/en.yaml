@@ -1,0 +1,20 @@
+configuration:
+  cameras:
+    name: Cameras
+    description: >-
+      A name and the brand per camera. With a brand, enter IP address, user and password (port only
+      when it differs); with Dahua also choose which sub stream (1, 2 or 3) is used for detection.
+      With 'other' or UniFi enter the RTSP addresses yourself (main_url and optionally sub_url).
+      faces and plates turn on face and licence plate recognition per camera. Masks and zones are
+      set on the Uitkijk page; they are kept.
+  live_view:
+    name: Live view
+    description: Live view on the Uitkijk page through go2rtc.
+  storage:
+    name: Storage
+    description: >-
+      retention_days = days recordings are kept, person_days = days for recordings with a person or
+      the doorbell, max_gb = maximum space; above it the oldest recordings go first.
+  log_level:
+    name: Log level
+    description: How much goes into the log.

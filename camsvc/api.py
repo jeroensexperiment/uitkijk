@@ -585,10 +585,15 @@ def create_app(svc: "Service", config_path: Path | None = None) -> FastAPI:
         tmp.write_text(text, encoding="utf-8")
         tmp.chmod(0o600)
         try:
-            if not isinstance(yaml.safe_load(text), dict):
+            new = yaml.safe_load(text)
+            if not isinstance(new, dict):
                 raise ValueError("The file must contain settings (key: value)")
             load_config(tmp)
-        except (ValueError, KeyError, TypeError, yaml.YAMLError) as exc:
+            # HA app: the Configuration tab first, otherwise the next start would bring back the
+            # cameras from the old tab
+            from .ha_options import save_to_tab
+            save_to_tab(new)
+        except (ValueError, KeyError, TypeError, RuntimeError, yaml.YAMLError) as exc:
             tmp.unlink(missing_ok=True)
             raise HTTPException(400, f"Not saved: {exc}") from exc
         config_path.replace(config_path.with_suffix(".yaml.previous"))

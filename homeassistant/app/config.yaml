@@ -1,6 +1,6 @@
 # Uitkijk as a Home Assistant app (add-on). See DOCS.md in this folder.
 name: Uitkijk
-version: "0.2.1"
+version: "0.3.0"
 slug: uitkijk
 description: Local camera system with recordings, detection (CPU or Google Coral) and face/plate recognition
 url: https://github.com/jeroensexperiment/uitkijk
@@ -32,5 +32,33 @@ map:
 # face models (~500 MB) are downloaded again when missing
 backup_exclude:
   - "models/*"
-options: {}
-schema: {}
+# the Configuration tab: cameras and the main settings. They are written into config.yaml at
+# every start (masks, zones and other settings from config.yaml are kept); changes made with the
+# setup wizard or the configuration editor on the web page come back here by themselves.
+options:
+  cameras: []
+  live_view: true
+  storage:
+    retention_days: 7
+    person_days: 30
+    max_gb: 50
+  log_level: info
+schema:
+  cameras:
+    - name: str
+      brand: list(reolink|foscam|hikvision|dahua|tapo|unifi|other)
+      ip: str?
+      port: port?
+      username: str?
+      password: password?
+      sub_stream: list(1|2|3)?
+      main_url: str?
+      sub_url: str?
+      faces: bool?
+      plates: bool?
+  live_view: bool
+  storage:
+    retention_days: int(1,365)
+    person_days: int(1,365)
+    max_gb: int(1,100000)
+  log_level: list(debug|info|warning|error)

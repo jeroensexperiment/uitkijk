@@ -305,6 +305,11 @@ def create_setup_app(config_path: Path, state_dir: Path, reason: str):
             g.write_text(go2rtc_yaml(cfg))
             g.chmod(0o600)            # contains the camera passwords
             push_go2rtc(cfg["live"]["go2rtc_url"], cfg)
+        try:
+            from .ha_options import save_to_tab
+            save_to_tab(cfg)        # HA app: the new cameras also in the Configuration tab
+        except RuntimeError as exc:
+            log.warning("%s (it is filled at the next start)", exc)
         (state_dir / TOKEN_FILE).unlink(missing_ok=True)
         log.warning("Config saved to %s; restarting in normal mode", config_path)
         # stop a moment later so the response still arrives; Docker/systemd restarts us

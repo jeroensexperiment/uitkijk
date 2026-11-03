@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import urllib.error
 import urllib.request
 
 log = logging.getLogger(__name__)
@@ -58,3 +59,22 @@ def host_ip() -> str | None:
             for addr in (iface.get("ipv4") or {}).get("address") or []:
                 return addr.split("/")[0]
     return None
+
+
+def set_options(options: dict) -> None:
+    """Store the app options (the Configuration tab); RuntimeError with the Supervisor's reason."""
+    req = urllib.request.Request("http://supervisor/addons/self/options", method="POST",
+                                 data=json.dumps({"options": options}).encode(),
+                                 headers={"Authorization": f"Bearer {os.environ['SUPERVISOR_TOKEN']}",
+                                          "Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=10):
+            pass
+    except urllib.error.HTTPError as exc:
+        try:
+            reason = json.loads(exc.read()).get("message") or str(exc)
+        except ValueError:
+            reason = str(exc)
+        raise RuntimeError(f"Configuration tab not updated: {reason}") from exc
+    except OSError as exc:
+        raise RuntimeError(f"Configuration tab not updated: {exc}") from exc

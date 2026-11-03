@@ -1,0 +1,20 @@
+configuration:
+  cameras:
+    name: Camera's
+    description: >-
+      Per camera een naam en het merk. Bij een merk vul je IP-adres, gebruiker en wachtwoord in
+      (poort alleen als die afwijkt); bij Dahua kies je ook welke substream (1, 2 of 3) voor
+      detectie wordt gebruikt. Bij 'other' of UniFi vul je zelf de RTSP-adressen in (main_url en
+      eventueel sub_url). faces en plates zetten gezichts- en kentekenherkenning per camera aan.
+      Maskers en zones stel je in op de Uitkijk-pagina; die blijven bewaard.
+  live_view:
+    name: Live beeld
+    description: Live beeld op de Uitkijk-pagina via go2rtc.
+  storage:
+    name: Opslag
+    description: >-
+      retention_days = dagen dat opnames bewaard blijven, person_days = dagen voor opnames met een
+      persoon of de deurbel, max_gb = maximale ruimte; daarboven gaan de oudste opnames eerst weg.
+  log_level:
+    name: Logniveau
+    description: Hoeveel er in het Logboek komt.

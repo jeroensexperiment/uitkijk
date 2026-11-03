@@ -47,6 +47,11 @@ def main() -> None:
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)-7s %(name)s: %(message)s")
+    try:
+        from .ha_options import sync
+        sync(Path(args.config))     # HA app: the Configuration tab into config.yaml (no-op elsewhere)
+    except Exception:  # noqa: BLE001 - the tab must never block startup
+        logging.getLogger(__name__).exception("Applying the Configuration tab failed")
     migrate_old_data(Path(args.config))
     try:
         cfg = load_config(args.config)
