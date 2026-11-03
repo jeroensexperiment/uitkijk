@@ -5,7 +5,7 @@ blueprint:
     packages and vehicles. This automation turns it into a notification on your phone.
   domain: automation
   author: Uitkijk
-  source_url: https://github.com/lexi1986/uitkijk/blob/main/homeassistant/blueprints/automation/uitkijk/daily_summary.yaml
+  source_url: https://github.com/jeroensexperiment/uitkijk/blob/main/homeassistant/blueprints/automation/uitkijk/daily_summary.yaml
   homeassistant:
     min_version: "2024.10.0"
   input:

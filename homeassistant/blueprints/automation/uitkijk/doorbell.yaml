@@ -6,7 +6,7 @@ blueprint:
     few seconds, it is replaced by one with the name.
   domain: automation
   author: Uitkijk
-  source_url: https://github.com/lexi1986/uitkijk/blob/main/homeassistant/blueprints/automation/uitkijk/doorbell.yaml
+  source_url: https://github.com/jeroensexperiment/uitkijk/blob/main/homeassistant/blueprints/automation/uitkijk/doorbell.yaml
   homeassistant:
     min_version: "2024.10.0"
   input:

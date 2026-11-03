@@ -65,7 +65,7 @@ git pull && docker compose up -d --build
 
 On Home Assistant OS (Intel/AMD) Uitkijk can run as an app (add-on), with the page in the HA sidebar,
 MQTT filled in by itself and Google Coral support: add this repository under Settings → Apps → App
-store → Repositories. See [`homeassistant/app/DOCS.md`](homeassistant/app/DOCS.md).
+store → Repositories (`https://github.com/jeroensexperiment/uitkijk`). See [`homeassistant/app/DOCS.md`](homeassistant/app/DOCS.md).
 
 ### Without Docker (Proxmox container)
 

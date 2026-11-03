@@ -4,7 +4,7 @@
 
 # --- source ------------------------------------------------------------------------------------
 FROM python:3.11-slim-bookworm AS src
-ARG UITKIJK_REPO=https://github.com/lexi1986/uitkijk.git
+ARG UITKIJK_REPO=https://github.com/jeroensexperiment/uitkijk.git
 ARG UITKIJK_REF=main
 RUN apt-get update -qq && apt-get install -y -qq --no-install-recommends git ca-certificates \
  && git clone --depth 1 --branch "$UITKIJK_REF" "$UITKIJK_REPO" /src
