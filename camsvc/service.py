@@ -68,6 +68,8 @@ class Service:
             from .auth import Auth
             self.auth = Auth(cfg.state_dir, cfg.auth["rp_id"], cfg.auth["origin"], cfg.auth["session_days"])
         self.detector = self._load_detector()
+        self._faces_lock = threading.Lock()
+        self.faces_downloading = False
         self.faces = self._load_faces()
         self.plates = self._load_plates()
         # without an MQTT server (no Home Assistant) everything works except the HA integration
@@ -89,6 +91,8 @@ class Service:
         for cam in self.cameras.values():
             cam.arrivals = self.arrivals
             cam.bodies = self.bodies
+        if self.faces is None and any(c.settings["faces"]["enabled"] for c in cfg.cameras):
+            self._download_faces()      # on via the web page or the Configuration tab, models not here
 
         self.retention = RetentionWorker(cfg.clips_dir, cfg.retention_days, cfg.retention_max_gb,
                                          self._after_cleanup,
@@ -192,8 +196,7 @@ class Service:
         from .faces import FaceRecognizer
         models_dir = Path(self.cfg.model["path"]).parent
         if not FaceRecognizer.available(models_dir):
-            log.error("Face models missing in %s; face recognition off. "
-                      "See the guide: 'Face recognition'.", models_dir)
+            log.info("Face models not in %s yet; they are downloaded in the background", models_dir)
             return None
         try:
             return FaceRecognizer(models_dir, self.cfg.state_dir / "faces")
@@ -218,11 +221,42 @@ class Service:
         settings = self.cameras[cam].cfg.settings
         return {path: get_path(settings, path) for path in EDITABLE}
 
+    def _download_faces(self) -> None:
+        """Face recognition turned on while the models are not there yet (they are only fetched at
+        start for cameras that have it on in the config): fetch them in the background, then switch
+        it on for the cameras that want it."""
+        from .models import fetch_face_models
+        with self._faces_lock:
+            if self.faces_downloading:
+                return
+            self.faces_downloading = True
+
+        def run():
+            try:
+                if not fetch_face_models(Path(self.cfg.model["path"]).parent):
+                    return
+                faces = self._load_faces(force=True)
+                if faces is None:
+                    return
+                self.faces = faces
+                self.bodies = self._load_bodies()
+                for cam in self.cameras.values():
+                    if cam.cfg.settings["faces"]["enabled"]:
+                        cam.apply_settings({}, self.faces, self.plates)
+                    cam.bodies = self.bodies
+                log.info("Face models downloaded; face recognition is on")
+            finally:
+                self.faces_downloading = False
+
+        threading.Thread(target=run, name="face-models", daemon=True).start()
+
     def set_settings(self, cam: str, values: dict) -> dict:
+        downloading = False
         if values.get("faces.enabled") and self.faces is None:
             self.faces = self._load_faces(force=True)
             if self.faces is None:
-                raise ValueError("Face models are missing on the server")
+                self._download_faces()
+                downloading = True
         if values.get("plates.enabled") and self.plates is None:
             self.plates = self._load_plates(force=True)
             if self.plates is None:

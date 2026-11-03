@@ -84,8 +84,9 @@ def _fetch_arcface(dest_dir: Path) -> None:
 
 
 def ensure_models(cfg: "Config") -> None:
-    """Prepare missing models. Log errors, never block startup: without face models everything
-    else runs normally, without the object model only motion detection runs."""
+    """Prepare the object model. Log errors, never block startup: without it only motion detection
+    runs. Face models are fetched in the background by the service (fetch_face_models), so a slow
+    download of ~300 MB does not keep the web page away."""
     model = Path(cfg.model["path"])
     try:
         model.parent.mkdir(parents=True, exist_ok=True)
@@ -96,11 +97,15 @@ def ensure_models(cfg: "Config") -> None:
     except OSError as exc:
         log.error("Model folder %s not usable: %s", model.parent, exc)
         return
-    if not any(c.settings["faces"]["enabled"] for c in cfg.cameras):
-        return
+
+
+def fetch_face_models(models_dir: Path) -> bool:
+    """Download the face models that are missing; False (and logged) when that fails."""
     try:
         for name, (url, sha) in FACE_MODELS.items():
-            _fetch(model.parent / name, url, sha)
-        _fetch_arcface(model.parent)
+            _fetch(models_dir / name, url, sha)
+        _fetch_arcface(models_dir)
+        return True
     except (OSError, ValueError, zipfile.BadZipFile) as exc:
         log.error("Downloading face models failed (%s); will retry at the next start", exc)
+        return False

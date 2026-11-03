@@ -495,7 +495,11 @@ def create_app(svc: "Service", config_path: Path | None = None) -> FastAPI:
         get_cam(name)
         try:
             values = validate_settings(payload)
-            return {"values": svc.set_settings(name, values)}
+            res = {"values": svc.set_settings(name, values)}
+            if svc.faces_downloading:
+                res["note"] = ("Face models (~300 MB) are being downloaded; face recognition starts by "
+                               "itself in a few minutes.")
+            return res
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
 

@@ -947,6 +947,8 @@
         method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
       });
       if (!r.ok) { alert((await r.json().catch(() => ({}))).detail || "Saving failed"); return; }
+      const saved = await r.json().catch(() => ({}));
+      if (saved.note) alert(saved.note);
       $("setDlg").close();
       await Promise.all([loadFaces(), loadPlates()]); renderChips(); loadStatus();
     };
