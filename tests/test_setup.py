@@ -106,6 +106,9 @@ def test_config_editor(tmp_path, monkeypatch):
     svc = SimpleNamespace(cfg=SimpleNamespace(clips_dir=tmp_path), auth=None, cameras={})
     app = create_app(svc, cfg_file)
     monkeypatch.setenv("SUPERVISOR_TOKEN", "x")
+    tab = []
+    monkeypatch.setattr("camsvc.supervisor.set_options", tab.append)
+    monkeypatch.setattr("camsvc.ha_options.OPTIONS_FILE", tmp_path / "options.json")
     kills = []
     monkeypatch.setattr("threading.Timer", lambda *a: type("T", (), {"start": lambda s: kills.append(1)})())
     # from the home network: never (the file holds passwords)
@@ -117,3 +120,4 @@ def test_config_editor(tmp_path, monkeypatch):
     good = ha.put("/api/config", json={"yaml": "cameras:\n  - name: poort\n    main_url: rtsp://x/2\n"})
     assert good.status_code == 200 and "poort" in cfg_file.read_text() and kills == [1]
     assert svc.restart_requested and (tmp_path / "config.yaml.previous").exists()
+    assert tab[-1]["cameras"][0]["name"] == "poort"   # the Configuration tab follows
