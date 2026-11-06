@@ -9,7 +9,9 @@ configuration:
       Maskers en zones stel je in op de Uitkijk-pagina; die blijven bewaard.
   live_view:
     name: Live beeld
-    description: Live beeld op de Uitkijk-pagina via go2rtc.
+    description: >-
+      Het ▶-knopje op de camerategels: live meekijken, ook op volledig scherm (via go2rtc). Uit =
+      geen livebeeld; opnames en detectie werken gewoon door.
   storage:
     name: Opslag
     description: >-

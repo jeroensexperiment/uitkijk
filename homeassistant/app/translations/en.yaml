@@ -9,7 +9,9 @@ configuration:
       set on the Uitkijk page; they are kept.
   live_view:
     name: Live view
-    description: Live view on the Uitkijk page through go2rtc.
+    description: >-
+      The ▶ button on the camera tiles: watch live, also full screen (through go2rtc). Off = no
+      live view; recordings and detection keep working.
   storage:
     name: Storage
     description: >-
