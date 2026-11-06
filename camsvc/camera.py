@@ -21,7 +21,7 @@ import numpy as np
 from .config import CameraConfig
 from .detector import Detection, ObjectDetector, draw_detections
 from .events import EventRecord, EventStore, clip_paths
-from .faces import MIN_FACE_PX, FaceMatch, FaceRecognizer, summarize
+from .faces import DETECT_MAX_SIDE, MIN_FACE_PX, FaceMatch, FaceRecognizer, summarize
 from .motion import MotionDetector, build_mask, motion_region, point_masked, zones_at
 from .plates import PlateRead, PlateReader, vote
 from .recorder import RTSP_OPTIONS, MainRecorder
@@ -59,6 +59,7 @@ VERIFY_LABELS = {"person", "animal"}
 PLATE_PARKED_AFTER = 900.0    # unknown vehicle that stays this long: alert
 NIGHT_HOURS = (22, 7)         # unknown vehicle between these hours: alert immediately
 RING_FACE_ATTEMPTS = 3        # on a doorbell ring, search the whole frame for a face this often (1 s apart)
+HEAD_REGION_MIN = 400         # px of the main-stream image searched for a face, at least
 BOX_HISTORY = 60              # analysed frames kept from before an event (its pre-buffer)
 BOX_MAX = 3000                # at most this many analysed frames with boxes per clip
 ASK_FACE_AT = (1, 3)          # ask who it is the first time and again when an unknown face returns
@@ -90,6 +91,23 @@ def frac_box(box: tuple[int, int, int, int], shape: tuple[int, int]) -> list[flo
     """A box in pixels as fractions (0-1) of a frame of the given (height, width)."""
     h, w = shape
     return [round(box[0] / w, 3), round(box[1] / h, 3), round(box[2] / w, 3), round(box[3] / h, 3)]
+
+
+def head_region(box: tuple[int, int, int, int], sx: float, sy: float,
+                shape: tuple[int, int]) -> tuple[int, int, int, int]:
+    """Where to look for the face of a person found on the sub stream, in the main-stream image
+    (scale sx, sy; shape = its height, width). A square around the head of at least
+    HEAD_REGION_MIN px: the main-stream image is taken a moment later than the detection, so a
+    walking or cycling person has moved on a little. At most DETECT_MAX_SIDE, so YuNet sees it at
+    full resolution."""
+    x1, y1, x2, y2 = box
+    bw, bh = (x2 - x1) * sx, (y2 - y1) * sy
+    cx, cy = (x1 + x2) / 2 * sx, y1 * sy + 0.15 * bh       # the head: top centre of the person
+    side = min(max(HEAD_REGION_MIN, 2.0 * bw, 0.9 * bh), DETECT_MAX_SIDE)
+    h, w = shape
+    left = int(min(max(0, cx - side / 2), max(0, w - side)))
+    top = int(min(max(0, cy - side * 0.4), max(0, h - side)))
+    return left, top, int(min(w, left + side)), int(min(h, top + side))
 
 
 def boxes_timeline(entries: list, clip_start: float, duration: float, marks: list | None = None) -> dict:
@@ -760,12 +778,7 @@ class Camera:
                 matches = self.faces.analyse(frame, too_small)
                 searched.append(f"{frame.shape[1]}x{frame.shape[0]}")
             for x1, y1, x2, y2 in boxes:
-                # upper part of the person, slightly wider: that is where the head is
-                bw, bh = x2 - x1, y2 - y1
-                cx1 = int(max(0, (x1 - 0.2 * bw) * sx))
-                cx2 = int(min(frame.shape[1], (x2 + 0.2 * bw) * sx))
-                cy1 = int(max(0, (y1 - 0.1 * bh) * sy))
-                cy2 = int(min(frame.shape[0], (y1 + 0.6 * bh) * sy))
+                cx1, cy1, cx2, cy2 = head_region((x1, y1, x2, y2), sx, sy, frame.shape[:2])
                 searched.append(f"{cx2 - cx1}x{cy2 - cy1}")
                 if cx2 - cx1 < 40 or cy2 - cy1 < 40:
                     continue

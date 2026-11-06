@@ -138,7 +138,7 @@ class FaceRecognizer:
         self.faces_dir.mkdir(parents=True, exist_ok=True)
         self._lock = threading.Lock()
         self._detector = cv2.FaceDetectorYN.create(
-            str(models_dir / DETECTOR_FILE), "", (320, 320), score_threshold=0.8)
+            str(models_dir / DETECTOR_FILE), "", (320, 320), score_threshold=0.7)
         self._sface = cv2.FaceRecognizerSF.create(str(models_dir / RECOGNIZER_FILE), "")
         self._arcface = None
         if (models_dir / ARCFACE_FILE).exists():
