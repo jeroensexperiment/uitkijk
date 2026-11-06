@@ -97,7 +97,8 @@ def ensure_models(cfg: "Config") -> None:
             model.parent.mkdir(parents=True, exist_ok=True)
             for f in files:
                 bundled = BUNDLED_DIR / f.name
-                if not f.exists() and bundled.exists():
+                # also after an app update with a newer model: the copy follows the image
+                if bundled.exists() and (not f.exists() or _sha(f) != _sha(bundled)):
                     shutil.copy2(bundled, f)
                     log.info("Object model %s prepared", f.name)
         except OSError as exc:
