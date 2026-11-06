@@ -571,8 +571,8 @@ class Camera:
         with self._lock:
             seen = detections
             detections = self._drop_stationary(now, detections, labels)
-            moving = {id(d) for d in detections}
-            self._log_boxes(now, [(d, id(d) not in moving) for d in seen], bgr.shape[:2])
+            counted = {id(d) for d in detections}
+            self._log_boxes(now, [(d, id(d) not in counted) for d in seen], bgr.shape[:2])
             window = float(cfg.objects["hit_window_seconds"])
             for d in detections:
                 self._hits[d.label].append(now)
