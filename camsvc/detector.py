@@ -25,7 +25,10 @@ log = logging.getLogger(__name__)
 CLASS_TO_LABEL = {cls: label for label, classes in LABEL_CLASSES.items() for cls in classes}
 # Google's SSD models number the classes with the gaps of the original COCO list (90 ids);
 # YOLO uses the 80 classes without gaps. Only the classes Uitkijk uses.
-SSD_TO_COCO80 = {0: 0, 2: 2, 3: 3, 5: 5, 7: 7, 15: 14, 16: 15, 17: 16}
+SSD_TO_COCO80 = {0: 0, 1: 1, 2: 2, 3: 3, 5: 5, 7: 7, 15: 14, 16: 15, 17: 16}
+# names of the COCO-80 classes Uitkijk uses (shown on the boxes when playing a clip back)
+COCO_NAMES = {0: "person", 1: "bicycle", 2: "car", 3: "motorcycle", 5: "bus", 7: "truck",
+              14: "bird", 15: "cat", 16: "dog"}
 
 
 @dataclass(slots=True)
@@ -33,6 +36,7 @@ class Detection:
     label: str
     score: float
     box: tuple[int, int, int, int]   # x1, y1, x2, y2 in pixels of the input frame
+    kind: str = ""                   # the COCO class, e.g. car, bicycle, dog (label groups them)
 
 
 _OV_PROBE = r"""
@@ -223,7 +227,8 @@ class ObjectDetector:
         for i in np.array(idx).flatten():
             x, y, bw_, bh_ = rects[i]
             box = (max(int(x), 0), max(int(y), 0), min(int(x + bw_), w - 1), min(int(y + bh_), h - 1))
-            result.append(Detection(CLASS_TO_LABEL[int(cls_ids[i])], float(scores[i]), box))
+            cls = int(cls_ids[i])
+            result.append(Detection(CLASS_TO_LABEL[cls], float(scores[i]), box, COCO_NAMES.get(cls, "")))
         return result
 
     def _detect_ssd(self, bgr, img, scale, px, py, wanted, min_score) -> list[Detection]:
@@ -242,7 +247,7 @@ class ObjectDetector:
             box = (max(int((x1 * s - px) / scale), 0), max(int((y1 * s - py) / scale), 0),
                    min(int((x2 * s - px) / scale), w - 1), min(int((y2 * s - py) / scale), h - 1))
             if box[2] > box[0] and box[3] > box[1]:
-                result.append(Detection(CLASS_TO_LABEL[cls], float(score), box))
+                result.append(Detection(CLASS_TO_LABEL[cls], float(score), box, COCO_NAMES.get(cls, "")))
         return result
 
 

@@ -17,6 +17,10 @@ machine). What is different:
   Whatever does not work falls back to the CPU. The pill **CPU … · TPU/GPU …** at the top of the
   Uitkijk page shows the load; hover over it for images per second and milliseconds per image.
 - **go2rtc** for the live view runs inside the app.
+- **Boxes while playing back**: the player draws what was detected (person, car, bicycle, bus, dog …
+  with the score, the name of a recognised face and the plate) over the clip. Switch it on or off
+  with **Detections** under the video; the choice is remembered in the browser. Clips from before
+  0.5.0 have no boxes.
 - **Configuration tab** of the app: add, change or remove cameras (brand, IP, login, Dahua sub
   stream, faces, plates), storage and live view. Save and restart the app; masks and zones from the
   Uitkijk page stay.

@@ -550,9 +550,10 @@ def create_app(svc: "Service", config_path: Path | None = None) -> FastAPI:
         target = (clips_root / path).resolve()
         if clips_root not in target.parents or not target.is_file():
             raise HTTPException(404, "Not found")
-        if target.suffix not in (".mp4", ".jpg", ".json"):
+        if target.suffix not in (".mp4", ".jpg", ".json", ".boxes"):
             raise HTTPException(404, "Not found")
-        media = {".mp4": "video/mp4", ".jpg": "image/jpeg", ".json": "application/json"}[target.suffix]
+        media = {".mp4": "video/mp4", ".jpg": "image/jpeg", ".json": "application/json",
+                 ".boxes": "application/json"}[target.suffix]
         return FileResponse(target, media_type=media)
 
     # --- configuration file (editor on the web page) ------------------------

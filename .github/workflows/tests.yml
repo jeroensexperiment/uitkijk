@@ -14,3 +14,9 @@ jobs:
       - run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
       - run: pip install -r requirements-dev.txt
       - run: python -m pytest -q
+      - name: JavaScript in the web pages parses
+        run: |
+          for f in camsvc/web/*.html; do
+            python -c "import re,sys; print(\"\n\".join(re.findall(r\"<script>(.*?)</script>\", open(sys.argv[1]).read(), re.S)))" "$f" > page.js
+            node --check page.js || { echo "syntax error in $f"; exit 1; }
+          done

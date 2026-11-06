@@ -167,6 +167,8 @@
     dialog:has(.faces:not(:empty)) video { max-height: calc(100dvh - 300px); }
     dialog:has(#pFaces:not(:empty)):has(#pPlates:not(:empty)) video { max-height: calc(100dvh - 400px); }
     dialog:has(#pAi:not(:empty)) video { max-height: calc(100dvh - 330px); }
+    .pv-wrap { position: relative; }
+    .pv-boxes { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
     /* AI description */
     .ai-box { padding: .8rem 1rem; border-top: 1px solid var(--me-border); display: grid; gap: .45rem; }
     .ai-box:empty { display: none; }
@@ -365,7 +367,10 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
       </button>
     </div>
-    <video id="pVideo" controls playsinline preload="metadata"></video>
+    <div class="pv-wrap">
+      <video id="pVideo" controls playsinline preload="metadata"></video>
+      <canvas id="pBoxes" class="pv-boxes" aria-hidden="true"></canvas>
+    </div>
     <div class="faces" id="pFaces"></div>
     <div class="faces" id="pPlates"></div>
     <div class="ai-box" id="pAi" aria-live="polite"></div>
@@ -378,6 +383,7 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>
         </button>
       </div>
+      <button class="chip" id="pBoxesBtn" aria-pressed="true" title="Show what was detected (boxes) while playing">Detections</button>
       <button class="btn" id="pFalse" title="Nothing to worry about: ignore this spot for this kind of object from now on">Nothing to worry about</button>
       <a class="btn" id="pDownload" download>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11m0 0l-4-4m4 4l4-4M5 20h14"/></svg>Download
@@ -805,6 +811,7 @@
       renderFaces(e);
       renderPlates(e);
       renderAi(e);
+      loadBoxes(e);
       $("pPrev").disabled = i <= 0;
       $("pNext").disabled = i >= state.items.length - 1 && state.items.length >= state.total;
       if (!$("player").open) $("player").showModal();
@@ -814,6 +821,88 @@
       if (i >= state.items.length && state.items.length < state.total) await loadEvents(false);
       openEvent(i);
     }
+    // ---------- detection boxes while playing a clip ----------
+    // <clip>.boxes holds per analysed frame [seconds from clip start, [[kind, label, score, x1, y1, x2, y2], ...]]
+    // with the box as fractions of the frame. Shown over the video; the choice is kept per browser.
+    const KIND_NAMES = { person: "Person", bicycle: "Bicycle", car: "Car", motorcycle: "Motorcycle", bus: "Bus",
+      truck: "Truck", bird: "Bird", cat: "Cat", dog: "Dog", vehicle: "Vehicle", animal: "Animal" };
+    const boxes = { frames: null, clip: null, event: null, on: true, key: "", raf: 0 };
+    try { boxes.on = localStorage.getItem("camsvc-boxes") !== "off"; } catch {}
+    function cssColor(c) {
+      const m = /var\((--[^)]+)\)/.exec(c || "");
+      return m ? getComputedStyle(document.documentElement).getPropertyValue(m[1]).trim() || "#4cc9f0" : c || "#4cc9f0";
+    }
+    async function loadBoxes(e) {
+      boxes.frames = null; boxes.clip = e.clip; boxes.event = e; boxes.key = "";
+      $("pBoxesBtn").hidden = true;
+      $("pBoxesBtn").setAttribute("aria-pressed", String(boxes.on));
+      drawBoxes();
+      try {
+        const r = await fetch(`clips/${encodeURI(e.clip.replace(/\.mp4$/, ".boxes"))}`);
+        if (!r.ok || boxes.clip !== e.clip) return;
+        boxes.frames = (await r.json()).frames || [];
+      } catch { return; }
+      $("pBoxesBtn").hidden = !boxes.frames.length;
+      if (!boxes.raf) boxes.raf = requestAnimationFrame(tickBoxes);
+    }
+    function tickBoxes() {
+      boxes.raf = 0;
+      if (!$("player").open || !boxes.frames) { drawBoxes(true); return; }
+      drawBoxes();
+      boxes.raf = requestAnimationFrame(tickBoxes);
+    }
+    function frameAt(t) {             // the last analysed frame at or before t (binary search)
+      const f = boxes.frames;
+      let lo = 0, hi = f.length - 1, found = -1;
+      while (lo <= hi) { const mid = (lo + hi) >> 1; if (f[mid][0] <= t) { found = mid; lo = mid + 1; } else hi = mid - 1; }
+      return found >= 0 && t - f[found][0] <= 1.0 ? f[found][1] : null;
+    }
+    function drawBoxes(clear = false) {
+      const v = $("pVideo"), cv = $("pBoxes");
+      const w = v.clientWidth, h = v.clientHeight, dpr = window.devicePixelRatio || 1;
+      const show = !clear && boxes.on && boxes.frames && v.videoWidth;
+      const items = show ? frameAt(v.currentTime) : null;
+      const key = `${w}x${h}|${items ? JSON.stringify(items) : ""}`;
+      if (key === boxes.key) return;
+      boxes.key = key;
+      cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr);
+      const ctx = cv.getContext("2d");
+      ctx.clearRect(0, 0, cv.width, cv.height);
+      if (!items?.length) return;
+      ctx.scale(dpr, dpr);
+      // the picture inside the video element (letterboxed, like object-fit: contain)
+      const s = Math.min(w / v.videoWidth, h / v.videoHeight);
+      const pw = v.videoWidth * s, ph = v.videoHeight * s, ox = (w - pw) / 2, oy = (h - ph) / 2;
+      const e = boxes.event || {};
+      const persons = items.filter((b) => b[1] === "person").length;
+      const vehicles = items.filter((b) => b[1] === "vehicle").length;
+      const who = persons === 1 ? knownNames(e) : "";
+      const plate = vehicles === 1 && e.plates?.length === 1
+        ? (state.plates.known[e.plates[0].plate] || e.plates[0].plate) : "";
+      ctx.font = "600 12px system-ui, sans-serif";
+      ctx.lineWidth = 2;
+      for (const [kind, label, score, x1, y1, x2, y2] of items) {
+        const color = cssColor((LABELS[label] || LABELS.motion).color);
+        const bx = ox + x1 * pw, by = oy + y1 * ph, bw = (x2 - x1) * pw, bh = (y2 - y1) * ph;
+        ctx.strokeStyle = color;
+        ctx.strokeRect(bx, by, bw, bh);
+        const extra = label === "person" && who ? ` · ${who}` : label === "vehicle" && plate && kind !== "bicycle" ? ` · ${plate}` : "";
+        const text = `${KIND_NAMES[kind] || kind}${extra} ${Math.round(score * 100)}%`;
+        const tw = ctx.measureText(text).width + 8;
+        const ty = by >= 18 ? by - 18 : by;
+        ctx.fillStyle = color;
+        ctx.fillRect(bx - 1, ty, tw, 18);
+        ctx.fillStyle = "#0b1020";
+        ctx.fillText(text, bx + 3, ty + 13);
+      }
+    }
+    $("pBoxesBtn").addEventListener("click", () => {
+      boxes.on = !boxes.on;
+      try { localStorage.setItem("camsvc-boxes", boxes.on ? "on" : "off"); } catch {}
+      $("pBoxesBtn").setAttribute("aria-pressed", String(boxes.on));
+      boxes.key = "";
+      drawBoxes();
+    });
     function closePlayer() {
       const v = $("pVideo");
       v.pause(); v.removeAttribute("src"); v.load();

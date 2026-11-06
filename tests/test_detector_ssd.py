@@ -29,3 +29,9 @@ def test_ssd_min_score_and_labels():
     det = _ssd_detector(boxes=[[0.3, 0.3, 0.6, 0.6]] * 2, classes=[0, 2], scores=[0.4, 0.9])
     found = det.detect(np.zeros((320, 320, 3), np.uint8), ["person"], 0.5)
     assert found == []
+
+
+def test_ssd_bicycle_is_a_vehicle_with_its_own_name():
+    det = _ssd_detector(boxes=[[0.2, 0.2, 0.8, 0.8], [0.1, 0.1, 0.5, 0.5]], classes=[1, 2], scores=[0.8, 0.9])
+    found = det.detect(np.zeros((320, 320, 3), np.uint8), ["vehicle"], 0.5)
+    assert sorted((d.label, d.kind) for d in found) == [("vehicle", "bicycle"), ("vehicle", "car")]

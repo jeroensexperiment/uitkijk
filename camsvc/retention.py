@@ -10,7 +10,7 @@ from typing import Callable
 
 log = logging.getLogger(__name__)
 
-EXTS = (".mp4", ".jpg", ".json")
+EXTS = (".mp4", ".jpg", ".json", ".boxes")   # .boxes: detection boxes for playback
 
 
 def _event_groups(clips_dir: Path) -> list[tuple[float, list[Path]]]:

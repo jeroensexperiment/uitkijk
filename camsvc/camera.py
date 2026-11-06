@@ -59,6 +59,8 @@ VERIFY_LABELS = {"person", "animal"}
 PLATE_PARKED_AFTER = 900.0    # unknown vehicle that stays this long: alert
 NIGHT_HOURS = (22, 7)         # unknown vehicle between these hours: alert immediately
 RING_FACE_ATTEMPTS = 3        # on a doorbell ring, search the whole frame for a face this often (1 s apart)
+BOX_HISTORY = 60              # analysed frames kept from before an event (its pre-buffer)
+BOX_MAX = 3000                # at most this many analysed frames with boxes per clip
 ASK_FACE_AT = (1, 3)          # ask who it is the first time and again when an unknown face returns
 BODY_ATTEMPTS = 3             # this many sharp crops of the person per event
 BODY_INTERVAL = 2.0
@@ -82,6 +84,14 @@ def contained(a: tuple[int, int, int, int], b: tuple[int, int, int, int]) -> flo
     iy = max(0, min(a[3], b[3]) - max(a[1], b[1]))
     area = (a[2] - a[0]) * (a[3] - a[1])
     return ix * iy / area if area > 0 else 0.0
+
+
+def boxes_timeline(entries: list, clip_start: float, duration: float) -> dict:
+    """The boxes of an event for playback: times in seconds from the start of the clip (which
+    begins with the pre-buffer). Stored next to the clip as <clip>.boxes."""
+    frames = [[round(t - clip_start, 2), boxes] for t, boxes in entries
+              if -0.5 <= t - clip_start <= duration + 0.5]
+    return {"version": 1, "frames": frames}
 
 
 @dataclass
@@ -146,6 +156,7 @@ class ActiveEvent:
     ai_labels: set[str] = field(default_factory=set)   # labels at the time the AI description was requested
     false_alarm: str | None = None
     external: dict | None = None
+    boxes: list = field(default_factory=list)   # (time.monotonic(), [box, ...]) per analysed frame
 
 
 class Camera:
@@ -184,6 +195,8 @@ class Camera:
         self._last_motion = 0.0
         self.object_active: dict[str, bool] = {lbl: False for lbl in ("person", "vehicle", "animal")}
         self._last_object: dict[str, float] = {lbl: 0.0 for lbl in self.object_active}
+        # the last analysed frames, so a new event also gets the boxes from just before it started
+        self._recent_boxes: deque = deque(maxlen=BOX_HISTORY)
         self._hits: dict[str, deque[float]] = {lbl: deque() for lbl in self.object_active}
         self._tracks: list[Track] = []
         self._tracks_file = state_dir / f"stationary_{cfg.name}.json"
@@ -499,7 +512,7 @@ class Camera:
             detections = self.detector.detect(bgr, labels, float(cfg.objects["min_score"]))
         else:
             x0, y0, x1, y1 = region
-            detections = [Detection(d.label, d.score, (d.box[0] + x0, d.box[1] + y0, d.box[2] + x0, d.box[3] + y0))
+            detections = [Detection(d.label, d.score, (d.box[0] + x0, d.box[1] + y0, d.box[2] + x0, d.box[3] + y0), d.kind)
                           for d in self.detector.detect(bgr[y0:y1, x0:x1], labels,
                                                         float(cfg.objects["min_score"]))]
             self.stats["zoom"] = self.stats.get("zoom", 0) + 1
@@ -526,6 +539,7 @@ class Camera:
         detections = self._verify(now, detections, bgr.shape[:2])
         with self._lock:
             detections = self._drop_stationary(now, detections, labels)
+            self._log_boxes(now, detections, bgr.shape[:2])
             window = float(cfg.objects["hit_window_seconds"])
             for d in detections:
                 self._hits[d.label].append(now)
@@ -557,6 +571,21 @@ class Camera:
                     if cars and self.event is not None:
                         self.event.vehicle_box = max(cars, key=lambda b: (b[2] - b[0]) * (b[3] - b[1]))
                     self._maybe_plates(now, bgr.shape[:2], cars)
+
+    def _log_boxes(self, now: float, detections: list[Detection], shape: tuple[int, int]) -> None:
+        """Remember what was detected in this frame, as fractions of the frame (lock already
+        held). Played back as boxes over the clip. A frame without anything is only noted right
+        after one with boxes, so the boxes disappear at the right moment."""
+        h, w = shape
+        boxes = [[d.kind or d.label, d.label, round(d.score, 2),
+                  round(d.box[0] / w, 3), round(d.box[1] / h, 3), round(d.box[2] / w, 3), round(d.box[3] / h, 3)]
+                 for d in detections]
+        if not boxes and (not self._recent_boxes or not self._recent_boxes[-1][1]):
+            return
+        entry = (now, boxes)
+        self._recent_boxes.append(entry)
+        if self.event is not None and len(self.event.boxes) < BOX_MAX:
+            self.event.boxes.append(entry)
 
     def _drop_stationary(self, now: float, detections: list[Detection],
                          labels: list[str]) -> list[Detection]:
@@ -885,6 +914,7 @@ class Camera:
             self.event = ActiveEvent(
                 id=uuid.uuid4().hex[:12], start_wall=datetime.now().astimezone(), start_mono=now,
                 last_trigger=now, label=label, labels={label}, best_score=score, snapshot_jpg=snapshot)
+            self.event.boxes = list(self._recent_boxes)
             self.recorder.start_event(self.event.id)
             self._write_part_meta(self.event)
             log.info("[%s] event started: %s", self.name, label)
@@ -1115,6 +1145,11 @@ class Camera:
         # .parts is on the same disk as the clips, so this is a fast rename;
         # shutil.move falls back to copying if that ever changes
         shutil.move(str(part), str(mp4))
+        clip_start = self.recorder.clip_starts.pop(ev.id, None)
+        if ev.boxes and clip_start is not None:
+            timeline = boxes_timeline(ev.boxes, clip_start, duration)
+            if timeline["frames"]:
+                mp4.with_suffix(".boxes").write_text(json.dumps(timeline, separators=(",", ":")))
         plates = []
         for plate in dict.fromkeys(r.plate for r in ev.plates):   # every plate once
             best = max((r for r in ev.plates if r.plate == plate), key=lambda r: r.confidence)

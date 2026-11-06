@@ -237,6 +237,9 @@ class MainRecorder(threading.Thread):
         self._want_event: str | None = None   # event id that should be recording
         self._writer: ClipWriter | None = None
         self._writer_event: str | None = None
+        # event id -> time.monotonic() of the first packet in the clip (the start of the pre-buffer),
+        # so the detection boxes can be shown at the right moment when playing the clip back
+        self.clip_starts: dict[str, float] = {}
         self.online = False
         self.codec = ""
         self.bitrate_kbps = 0.0
@@ -364,7 +367,11 @@ class MainRecorder(threading.Thread):
             path = self.part_dir / f"{want}.mp4.part"
             self._writer = ClipWriter(path, streams, video_index)
             self._writer_event = want
-            for old in self.ring.snapshot():   # the pre-buffer (already contains bp)
+            pre = self.ring.snapshot()         # the pre-buffer (already contains bp)
+            self.clip_starts[want] = pre[0].arrival if pre else time.monotonic()
+            while len(self.clip_starts) > 20:
+                self.clip_starts.pop(next(iter(self.clip_starts)))
+            for old in pre:
                 self._writer.write(old)
             log.info("[%s] recording started (%s, %.1fs pre-buffer)",
                      self.cam_name, want, self.ring.seconds)
