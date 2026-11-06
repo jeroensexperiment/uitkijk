@@ -46,7 +46,8 @@ def main() -> None:
                                                            "/etc/camera-service/config.yaml"))
     args = parser.parse_args()
 
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)-7s %(name)s: %(message)s")
+    from .logredact import setup as setup_logging
+    setup_logging()
     try:
         from .ha_options import sync
         sync(Path(args.config))     # HA app: the Configuration tab into config.yaml (no-op elsewhere)

@@ -199,5 +199,6 @@ def sync(config_path: Path) -> None:
 
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)-7s %(name)s: %(message)s")
+    from .logredact import setup as setup_logging
+    setup_logging()
     sync(Path(os.environ.get("CAMSVC_CONFIG", "/config/config.yaml")))

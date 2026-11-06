@@ -33,8 +33,13 @@ jobs:
             pip install ultralytics onnx onnxslim
             yolo export model=yolo11n.pt format=onnx imgsz=320 opset=17 simplify=True
             cp yolo11n.onnx ../out/
-            yolo export model=yolo11n.pt format=edgetpu imgsz=320
-            cp "$(find . -name '*_edgetpu.tflite' | head -1)" ../out/yolo11n_edgetpu.tflite
+            # the compiler from GitHub (14.1) lacks the --search_delegate option Ultralytics passes:
+            # let Ultralytics make the int8 model and compile it here
+            yolo export model=yolo11n.pt format=edgetpu imgsz=320 || true
+            q="$(find . -name "*_full_integer_quant.tflite" | head -1)"
+            edgetpu_compiler --show_operations --out_dir edgetpu "$q"
+            cp edgetpu/*_edgetpu.tflite ../out/yolo11n_edgetpu.tflite
+            cat edgetpu/*.log || true
           } > ../out/export.log 2>&1 || { tail -80 ../out/export.log; exit 1; }
           tail -30 ../out/export.log
           ls -l ../out
