@@ -1,0 +1,49 @@
+# Builds the object models once and publishes them as the release "models":
+#   yolo11n.onnx            (CPU, ONNX Runtime)
+#   yolo11n_edgetpu.tflite  (Google Coral)
+#   export.log              (the full conversion output, also when it fails)
+# The Home Assistant app downloads them from there instead of converting during installation.
+name: Models
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: [.github/workflows/models.yml]
+permissions:
+  contents: write
+jobs:
+  export:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Edge TPU compiler (Google's package source is gone; the binaries are on GitHub)
+        run: |
+          git clone --depth 1 --filter=blob:none --sparse https://github.com/google-coral/edgetpu "$RUNNER_TEMP/edgetpu"
+          git -C "$RUNNER_TEMP/edgetpu" sparse-checkout set compiler/x86_64
+          echo "$RUNNER_TEMP/edgetpu/compiler/x86_64" >> "$GITHUB_PATH"
+      - name: Export
+        run: |
+          mkdir -p out work && cd work
+          {
+            set -x
+            edgetpu_compiler --version
+            pip install --index-url https://download.pytorch.org/whl/cpu torch torchvision
+            pip install ultralytics onnx onnxslim
+            yolo export model=yolo11n.pt format=onnx imgsz=320 opset=17 simplify=True
+            cp yolo11n.onnx ../out/
+            yolo export model=yolo11n.pt format=edgetpu imgsz=320
+            cp "$(find . -name '*_edgetpu.tflite' | head -1)" ../out/yolo11n_edgetpu.tflite
+          } > ../out/export.log 2>&1 || { tail -80 ../out/export.log; exit 1; }
+          tail -30 ../out/export.log
+          ls -l ../out
+      - name: Publish
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view models -R "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
+            || gh release create models -R "$GITHUB_REPOSITORY" --title "Object models" \
+                 --notes "Built by .github/workflows/models.yml; used by the Home Assistant app."
+          gh release upload models out/* --clobber -R "$GITHUB_REPOSITORY"
