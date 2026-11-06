@@ -11,6 +11,7 @@ import logging
 import subprocess
 import sys
 import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -75,6 +76,8 @@ class ObjectDetector:
         self.input_size = int(input_size)
         self._lock = threading.Lock()
         self.accelerated = False   # True = the model does not run on the CPU
+        self.busy_seconds = 0.0    # time spent running the model (for the usage meter)
+        self.runs = 0
         path = Path(model_path)
         if path.suffix == ".onnx":
             self._load_onnx(path)
@@ -196,7 +199,10 @@ class ObjectDetector:
             return self._detect_ssd(bgr, img, scale, px, py, wanted, min_score)
         blob = cv2.dnn.blobFromImage(img, 1 / 255.0, swapRB=True)  # NCHW, RGB, 0-1
         with self._lock:
+            t0 = time.perf_counter()
             pred = self._run(blob)[0]                # [4 + C, N]
+            self.busy_seconds += time.perf_counter() - t0
+            self.runs += 1
         pred = pred.T                                # [N, 4 + C]
         class_scores = pred[:, 4:]
         cls_ids = class_scores.argmax(axis=1)
@@ -222,7 +228,10 @@ class ObjectDetector:
 
     def _detect_ssd(self, bgr, img, scale, px, py, wanted, min_score) -> list[Detection]:
         with self._lock:
+            t0 = time.perf_counter()
             boxes, classes, scores = self._ssd(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
+            self.busy_seconds += time.perf_counter() - t0
+            self.runs += 1
         h, w = bgr.shape[:2]
         s = self._ssd_size
         result = []

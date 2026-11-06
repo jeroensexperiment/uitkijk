@@ -451,6 +451,7 @@ def create_app(svc: "Service", config_path: Path | None = None) -> FastAPI:
             "storage": {"clips_dir": str(clips_root), "used_gb": round(svc.retention.used_gb, 2),
                         "max_gb": svc.cfg.retention_max_gb, "retention_days": svc.cfg.retention_days},
             "detector": getattr(svc.detector, "device", None),
+            "usage": svc.usage.sample(svc.detector) if getattr(svc, "usage", None) else None,
             "ai": svc.ai.status() if svc.ai else {"state": "off"},
             "health": svc.health_snapshot(),
             "cameras": [c.status() for c in svc.cameras.values()],

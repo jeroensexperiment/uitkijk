@@ -18,3 +18,10 @@ configuration:
   log_level:
     name: Log level
     description: How much goes into the log.
+  detector:
+    name: Detection on
+    description: >-
+      Where the object model runs. auto = the Coral when it works, otherwise the Intel iGPU,
+      otherwise the CPU. coral = Google Coral (fast, a little less accurate than YOLO). gpu =
+      YOLO11n on the Intel iGPU (OpenVINO). cpu = YOLO11n on the processor. When the choice does
+      not work it falls back to the CPU; the usage is shown at the top of the Uitkijk page.

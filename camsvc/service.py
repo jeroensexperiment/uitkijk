@@ -59,8 +59,9 @@ class Service:
 
         self.store = EventStore(cfg.clips_dir, cfg.public_url)
         self._rescue_parts()
-        from .health import Health
+        from .health import Health, Usage
         self.health = Health(cfg.state_dir, cfg.clips_dir)
+        self.usage = Usage()
         if self.health.previous_crash:
             log.warning("Previous run did not stop cleanly (crash or out of memory?)")
         self.auth = None
@@ -150,6 +151,10 @@ class Service:
         elif coral:
             log.warning("Coral model %s not found; see the guide 'Google Coral'", coral)
         path = Path(self.cfg.model["path"])
+        fallback = self.cfg.model.get("fallback_path")
+        if not path.exists() and fallback and Path(fallback).exists():
+            log.warning("Object model %s not found; using %s", path, fallback)
+            path = Path(fallback)
         if not path.exists():
             log.error("Model %s not found; object detection off, motion detection only. "
                       "See the guide: 'Exporting the model'.", path)
@@ -157,6 +162,14 @@ class Service:
         try:
             return ObjectDetector(path, self.cfg.model["device"], size)
         except Exception as exc:  # noqa: BLE001
+            fallback = self.cfg.model.get("fallback_path")
+            if fallback and Path(fallback).exists() and Path(fallback) != path:
+                # e.g. the iGPU model (OpenVINO) does not work here: the ONNX model on the CPU
+                log.warning("Object model %s not usable (%s); falling back to %s", path.name, exc, fallback)
+                try:
+                    return ObjectDetector(fallback, "CPU", size)
+                except Exception as exc2:  # noqa: BLE001
+                    exc = exc2
             log.error("Loading the object model failed (%s); motion detection only", exc)
             return None
 

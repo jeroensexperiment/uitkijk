@@ -1,7 +1,8 @@
-# Builds the CPU object model once and publishes it as the release "models":
-#   yolo11n.onnx  (ONNX Runtime, CPU)
-#   export.log    (the full conversion output, also when it fails)
-# The Home Assistant app downloads it from there instead of converting during installation.
+# Builds the YOLO11n object models once and publishes them as the release "models":
+#   yolo11n.onnx               (ONNX Runtime, CPU)
+#   yolo11n.xml + yolo11n.bin  (OpenVINO, Intel iGPU; same OpenVINO version as requirements.txt)
+#   export.log                 (the full conversion output, also when it fails)
+# The Home Assistant app downloads them from there instead of converting during installation.
 # The Coral uses Google's ready-made SSDLite MobileDet model: a YOLO model for the Edge TPU needs
 # the Edge TPU compiler 16, which is no longer published (the one on GitHub, 14.1, crashes on it).
 name: Models
@@ -26,9 +27,11 @@ jobs:
           {
             set -ex
             pip install --index-url https://download.pytorch.org/whl/cpu torch torchvision
-            pip install ultralytics onnx onnxslim
+            pip install ultralytics onnx onnxslim "openvino==2026.4.1"
             yolo export model=yolo11n.pt format=onnx imgsz=320 opset=17 simplify=True
             cp yolo11n.onnx ../out/
+            yolo export model=yolo11n.pt format=openvino imgsz=320 half=False
+            cp yolo11n_openvino_model/yolo11n.xml yolo11n_openvino_model/yolo11n.bin ../out/
           } 2>&1 | tee ../out/export.log
       - name: Publish
         if: always()
@@ -38,5 +41,4 @@ jobs:
           gh release view models -R "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
             || gh release create models -R "$GITHUB_REPOSITORY" --title "Object models" \
                  --notes "Built by .github/workflows/models.yml; used by the Home Assistant app."
-          gh release delete-asset models yolo11n_edgetpu.tflite -y -R "$GITHUB_REPOSITORY" 2>/dev/null || true
           gh release upload models out/* --clobber -R "$GITHUB_REPOSITORY"

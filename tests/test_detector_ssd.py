@@ -8,6 +8,7 @@ def _ssd_detector(boxes, classes, scores):
     det.input_size = det._ssd_size = 320
     import threading
     det._lock = threading.Lock()
+    det.busy_seconds, det.runs = 0.0, 0
     det._ssd = lambda rgb: (np.array(boxes, np.float32), np.array(classes), np.array(scores, np.float32))
     return det
 

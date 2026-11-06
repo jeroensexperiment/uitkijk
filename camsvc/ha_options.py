@@ -91,14 +91,38 @@ def options_to_config(opts: dict, existing: dict, mqtt: dict | None, public_url:
     api["port"] = int(os.environ.get("CAMSVC_PORT", api.get("port", 8080)))
     if public_url and not cfg.get("auth"):
         api.setdefault("public_url", public_url)
-    cfg.setdefault("model", {"path": os.environ.get("CAMSVC_MODEL", "/data/models/yolo11n.onnx"),
-                             "input_size": 320})
+    cfg["model"] = model_config(str(opts.get("detector") or "auto"), cfg.get("model") or {})
     if opts.get("live_view", True):
         cfg["live"] = {**(cfg.get("live") or {}),
                        "go2rtc_url": (cfg.get("live") or {}).get("go2rtc_url") or DEFAULT_GO2RTC}
     else:
         cfg.pop("live", None)
     return cfg
+
+
+DETECTORS = ("auto", "coral", "gpu", "cpu")
+
+
+def model_config(detector: str, existing: dict) -> dict:
+    """The object model for the 'detector' choice in the tab. All of them fall back to the CPU
+    (YOLO11n, ONNX) when the Coral or the iGPU does not work.
+    - coral: Google Coral (SSDLite MobileDet: fast, a little less accurate than YOLO)
+    - gpu:   YOLO11n via OpenVINO on the Intel iGPU
+    - cpu:   YOLO11n via ONNX Runtime
+    - auto:  the Coral when it works, otherwise the iGPU, otherwise the CPU"""
+    if detector not in DETECTORS:
+        raise ValueError(f"Unknown detector '{detector}' (choose {', '.join(DETECTORS)})")
+    onnx = os.environ.get("CAMSVC_MODEL", "/data/models/yolo11n.onnx")
+    xml = str(Path(onnx).with_suffix(".xml"))
+    gpu_ok = (Path(os.environ.get("CAMSVC_BUNDLED_MODELS", "/opt/camsvc-models")) / "yolo11n.xml").exists()
+    model = {**existing, "input_size": int(existing.get("input_size") or 320)}
+    model["coral_path"] = os.environ.get("CAMSVC_CORAL_MODEL", "") if detector in ("auto", "coral") else ""
+    if detector in ("auto", "gpu") and gpu_ok:
+        model.update(path=xml, device="GPU" if detector == "gpu" else "AUTO", fallback_path=onnx)
+    else:
+        model.update(path=onnx, device="CPU")
+        model.pop("fallback_path", None)
+    return model
 
 
 def config_to_options(cfg: dict, current: dict | None) -> dict:
@@ -137,6 +161,7 @@ def config_to_options(cfg: dict, current: dict | None) -> dict:
                     "person_days": max(1, round(float(labels.get("person", 30)))),
                     "max_gb": max(1, round(float(storage.get("max_gb", 50))))},
         "log_level": level if level in ("debug", "info", "warning", "error") else "info",
+        "detector": current.get("detector") if current.get("detector") in DETECTORS else "auto",
     }
 
 

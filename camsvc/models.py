@@ -87,16 +87,22 @@ def ensure_models(cfg: "Config") -> None:
     """Prepare the object model. Log errors, never block startup: without it only motion detection
     runs. Face models are fetched in the background by the service (fetch_face_models), so a slow
     download of ~300 MB does not keep the web page away."""
-    model = Path(cfg.model["path"])
-    try:
-        model.parent.mkdir(parents=True, exist_ok=True)
-        bundled = BUNDLED_DIR / model.name
-        if not model.exists() and bundled.exists():
-            shutil.copy2(bundled, model)
-            log.info("Object model %s prepared", model.name)
-    except OSError as exc:
-        log.error("Model folder %s not usable: %s", model.parent, exc)
-        return
+    paths = [Path(cfg.model["path"])]
+    if cfg.model.get("fallback_path"):
+        paths.append(Path(cfg.model["fallback_path"]))
+    for model in paths:
+        # OpenVINO: the .xml needs its .bin next to it
+        files = [model, model.with_suffix(".bin")] if model.suffix == ".xml" else [model]
+        try:
+            model.parent.mkdir(parents=True, exist_ok=True)
+            for f in files:
+                bundled = BUNDLED_DIR / f.name
+                if not f.exists() and bundled.exists():
+                    shutil.copy2(bundled, f)
+                    log.info("Object model %s prepared", f.name)
+        except OSError as exc:
+            log.error("Model folder %s not usable: %s", model.parent, exc)
+            return
 
 
 def fetch_face_models(models_dir: Path) -> bool:

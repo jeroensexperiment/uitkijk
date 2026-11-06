@@ -93,6 +93,7 @@
     .dot { width: .5rem; height: .5rem; border-radius: 50%; background: var(--me-text-muted); display: inline-block; flex-shrink: 0; }
     .dot.on { background: var(--me-success); }
     .dot.off { background: var(--me-danger); }
+    .dot.warn { background: var(--me-warning); }
     .name { display: flex; align-items: center; gap: .5rem; }
     .badge { display: inline-flex; align-items: center; gap: .35rem; font-size: .7rem; font-weight: 600; padding: .2rem .55rem; border-radius: var(--me-radius-pill); background: var(--me-elevated); color: var(--me-text-secondary); white-space: nowrap; }
     .badge.rec { background: var(--me-warning-soft); color: var(--me-warning); }
@@ -599,6 +600,22 @@
         : "") + cars.map(([plate, name]) =>
           `<button class="chip" data-plate="${esc(plate)}" aria-pressed="${state.plate === plate}" title="${esc(plate)}"><span class="sw" style="background:var(--me-violet)"></span>${esc(name)}</button>`).join("");
     }
+    // CPU of the machine and how busy the detector is (Coral = TPU, iGPU = GPU), over the last seconds
+    function usagePill(u) {
+      if (!u || (u.system_cpu == null && u.app_cpu == null)) return "";
+      const pct = (v) => `${Math.round(v)}%`;
+      const cpu = u.system_cpu ?? u.app_cpu;
+      const d = u.detector;
+      const dev = d ? ({ "Edge TPU": "TPU" }[d.device] || d.device) : null;
+      const tip = [`Machine CPU ${pct(cpu)}`];
+      if (u.app_cpu != null) tip.push(`Uitkijk ${pct(u.app_cpu)} of all ${u.cpu_count} cores`);
+      if (d) tip.push(`Detection on ${d.device} (${d.backend})` + (d.fps != null
+        ? `: ${d.fps} images/s${d.ms != null ? `, ${d.ms} ms each` : ""}, busy ${pct(d.busy)}` : ""));
+      const hot = cpu >= 80 ? "off" : cpu >= 50 ? "warn" : "on";
+      return `<span class="pill" title="${esc(tip.join("\n"))}"><span class="dot ${hot}"></span>CPU <b>${pct(cpu)}</b>${
+        d && d.accelerated && d.busy != null ? ` <span class="muted">·</span> ${esc(dev)} <b>${pct(d.busy)}</b>` : ""}${
+        d && !d.accelerated && d.busy != null ? ` <span class="muted">· detection ${pct(d.busy)} of 1 core</span>` : ""}</span>`;
+    }
     async function loadStatus() {
       try {
         const [cams, st] = await Promise.all([api("api/cameras"), api("api/status")]);
@@ -611,6 +628,7 @@
         const gb = st.storage.used_gb.toLocaleString(undefined, { maximumFractionDigits: 1 });
         $("stats").innerHTML = `
           <span class="pill"><span class="dot ${cams.every((c) => c.online) ? "on" : "off"}"></span><b>${cams.filter((c) => c.online).length}/${cams.length}</b> online</span>
+          ${usagePill(st.usage)}
           ${state.faces.enabled ? `<button class="pill link" id="openPeople">Faces <b>${Object.keys(state.faces.people).length}</b>${state.faces.unknown ? ` <span class="muted">· ${state.faces.unknown} unknown</span>` : ""}</button>` : ""}
           ${state.plates.enabled ? `<button class="pill link" id="openPlates">Plates <b>${Object.keys(state.plates.known).length}</b></button>` : ""}
           <button class="pill link" id="openManage" title="Settings, masks, storage and server">Manage${

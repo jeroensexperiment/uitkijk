@@ -54,3 +54,26 @@ def test_bad_tab_keeps_config(tmp_path, monkeypatch):
     monkeypatch.setattr("camsvc.supervisor._get", lambda path: None)
     ha_options.sync(conf)
     assert "hek" in conf.read_text()
+
+
+def test_detector_choice(tmp_path, monkeypatch):
+    import pytest
+    monkeypatch.setenv("CAMSVC_MODEL", "/data/models/yolo11n.onnx")
+    monkeypatch.setenv("CAMSVC_CORAL_MODEL", "/opt/m/coral.tflite")
+    monkeypatch.setenv("CAMSVC_BUNDLED_MODELS", str(tmp_path))
+    # no iGPU model in the image: gpu becomes the CPU
+    m = ha_options.model_config("gpu", {})
+    assert m["path"].endswith(".onnx") and m["coral_path"] == "" and "fallback_path" not in m
+    (tmp_path / "yolo11n.xml").write_text("x")
+    m = ha_options.model_config("gpu", {"input_size": 320})
+    assert m["path"] == "/data/models/yolo11n.xml" and m["device"] == "GPU"
+    assert m["fallback_path"] == "/data/models/yolo11n.onnx" and m["coral_path"] == ""
+    m = ha_options.model_config("auto", {})
+    assert m["coral_path"] == "/opt/m/coral.tflite" and m["path"].endswith(".xml")
+    m = ha_options.model_config("coral", {})
+    assert m["coral_path"] == "/opt/m/coral.tflite" and m["path"].endswith(".onnx")
+    m = ha_options.model_config("cpu", m)
+    assert m["coral_path"] == "" and m["path"].endswith(".onnx") and "fallback_path" not in m
+    with pytest.raises(ValueError):
+        ha_options.model_config("tpu", {})
+    assert ha_options.config_to_options({}, {"detector": "gpu"})["detector"] == "gpu"

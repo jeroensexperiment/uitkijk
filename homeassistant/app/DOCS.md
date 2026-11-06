@@ -8,8 +8,14 @@ machine). What is different:
 - **MQTT**: the setup wizard fills in the login of the Mosquitto app by itself.
 - **Recordings** are in `/media/uitkijk`, so you also see them in the HA media browser. They are not
   part of the app backup (they can be large); settings, faces and plates in `/data` are.
-- **Google Coral (USB)**: driver and model are included. Plug it in before starting the app; the log
-  then says `Object model ... via TFLite on Edge TPU`. Without a Coral the CPU is used.
+- **Detection on the Coral, the Intel iGPU or the CPU** (Configuration tab → *Detection on*):
+  - `coral`: Google Coral USB with Google's SSDLite MobileDet (fast, a little less accurate than
+    YOLO). Plug it in before starting the app; the log says `... via TFLite on Edge TPU`.
+  - `gpu`: YOLO11n via OpenVINO on the Intel iGPU; the log says `... via OpenVINO on GPU`.
+  - `cpu`: YOLO11n via ONNX Runtime.
+  - `auto` (default): the Coral when it works, otherwise the iGPU, otherwise the CPU.
+  Whatever does not work falls back to the CPU. The pill **CPU … · TPU/GPU …** at the top of the
+  Uitkijk page shows the load; hover over it for images per second and milliseconds per image.
 - **go2rtc** for the live view runs inside the app.
 - **Configuration tab** of the app: add, change or remove cameras (brand, IP, login, Dahua sub
   stream, faces, plates), storage and live view. Save and restart the app; masks and zones from the

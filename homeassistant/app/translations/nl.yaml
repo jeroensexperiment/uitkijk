@@ -18,3 +18,10 @@ configuration:
   log_level:
     name: Logniveau
     description: Hoeveel er in het Logboek komt.
+  detector:
+    name: Detectie op
+    description: >-
+      Waar het objectmodel draait. auto = de Coral als die werkt, anders de Intel-GPU, anders de
+      CPU. coral = Google Coral (snel, iets minder nauwkeurig dan YOLO). gpu = YOLO11n op de
+      Intel-GPU (OpenVINO). cpu = YOLO11n op de processor. Werkt de keuze niet, dan valt het terug
+      op de CPU; het verbruik zie je bovenaan de Uitkijk-pagina.

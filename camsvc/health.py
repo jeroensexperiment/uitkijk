@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import threading
 import time
 from datetime import datetime
 from pathlib import Path
@@ -97,3 +98,58 @@ class Health:
             "cameras_online": cameras_online,
             "cameras_total": cameras_total,
         }
+
+
+def _system_cpu_ticks() -> tuple[int, int] | None:
+    """(busy, total) jiffies of the whole machine from /proc/stat."""
+    line = (_read(Path("/proc/stat")) or "").split("\n", 1)[0].split()
+    if not line or line[0] != "cpu":
+        return None
+    v = [int(x) for x in line[1:]]
+    idle = v[3] + (v[4] if len(v) > 4 else 0)      # idle + iowait
+    total = sum(v[:8])                              # without guest time (already in user)
+    return total - idle, total
+
+
+class Usage:
+    """CPU of the machine and of Uitkijk, and how busy the detector (CPU, GPU or Coral) is, over
+    the time since the previous call (the web page asks every few seconds)."""
+
+    def __init__(self):
+        self._last: tuple | None = None
+        self._prev: dict | None = None
+        self._lock = threading.Lock()
+
+    def sample(self, detector) -> dict:
+        with self._lock:
+            now = time.monotonic()
+            if self._prev and self._prev["app_cpu"] is not None and now - self._last[0] < 2:
+                return self._prev     # several pages asking at once: keep the measuring window
+            self._prev = self._sample(now, detector)
+            return self._prev
+
+    def _sample(self, now: float, detector) -> dict:
+        app = Health._cpu_seconds()
+        sys_ticks = _system_cpu_ticks()
+        busy = getattr(detector, "busy_seconds", 0.0)
+        runs = getattr(detector, "runs", 0)
+        last, self._last = self._last, (now, app, sys_ticks, busy, runs)
+        out: dict = {"cpu_count": os.cpu_count() or 1, "system_cpu": None, "app_cpu": None,
+                     "detector": None}
+        if detector is not None:
+            out["detector"] = {"device": getattr(detector, "device", None),
+                               "backend": getattr(detector, "backend", None),
+                               "accelerated": bool(getattr(detector, "accelerated", False)),
+                               "busy": None, "ms": None, "fps": None}
+        if last is None:
+            return out
+        dt = now - last[0]
+        out["app_cpu"] = round(100 * (app - last[1]) / dt / out["cpu_count"], 1)
+        if sys_ticks and last[2] and sys_ticks[1] > last[2][1]:
+            out["system_cpu"] = round(100 * (sys_ticks[0] - last[2][0]) / (sys_ticks[1] - last[2][1]), 1)
+        if out["detector"] is not None:
+            d_busy, d_runs = busy - last[3], runs - last[4]
+            out["detector"].update(busy=round(min(100.0, 100 * d_busy / dt), 1),
+                                   ms=round(1000 * d_busy / d_runs, 1) if d_runs > 0 else None,
+                                   fps=round(d_runs / dt, 1))
+        return out
