@@ -86,12 +86,24 @@ def contained(a: tuple[int, int, int, int], b: tuple[int, int, int, int]) -> flo
     return ix * iy / area if area > 0 else 0.0
 
 
-def boxes_timeline(entries: list, clip_start: float, duration: float) -> dict:
+def frac_box(box: tuple[int, int, int, int], shape: tuple[int, int]) -> list[float]:
+    """A box in pixels as fractions (0-1) of a frame of the given (height, width)."""
+    h, w = shape
+    return [round(box[0] / w, 3), round(box[1] / h, 3), round(box[2] / w, 3), round(box[3] / h, 3)]
+
+
+def boxes_timeline(entries: list, clip_start: float, duration: float, marks: list | None = None) -> dict:
     """The boxes of an event for playback: times in seconds from the start of the clip (which
-    begins with the pre-buffer). Stored next to the clip as <clip>.boxes."""
-    frames = [[round(t - clip_start, 2), boxes] for t, boxes in entries
-              if -0.5 <= t - clip_start <= duration + 0.5]
-    return {"version": 1, "frames": frames}
+    begins with the pre-buffer). Stored next to the clip as <clip>.boxes.
+    marks: what was read inside a box, (time, "plate" | "face", text, [x1, y1, x2, y2]), so the
+    player can put the plate or the name on the right box."""
+    def keep(t: float) -> bool:
+        return -0.5 <= t - clip_start <= duration + 0.5
+    frames = [[round(t - clip_start, 2), boxes] for t, boxes in entries if keep(t)]
+    out = {"version": 2, "frames": frames}
+    if marks:
+        out["marks"] = [[round(t - clip_start, 2), kind, text, box] for t, kind, text, box in marks if keep(t)]
+    return out
 
 
 @dataclass
@@ -157,6 +169,7 @@ class ActiveEvent:
     false_alarm: str | None = None
     external: dict | None = None
     boxes: list = field(default_factory=list)   # (time.monotonic(), [box, ...]) per analysed frame
+    marks: list = field(default_factory=list)   # (time.monotonic(), "plate"|"face", text, box) read inside a box
 
 
 class Camera:
@@ -538,8 +551,10 @@ class Camera:
             detections = [d for d in detections if not self._at_false_spot(d, bgr.shape[:2])]
         detections = self._verify(now, detections, bgr.shape[:2])
         with self._lock:
+            seen = detections
             detections = self._drop_stationary(now, detections, labels)
-            self._log_boxes(now, detections, bgr.shape[:2])
+            moving = {id(d) for d in detections}
+            self._log_boxes(now, [(d, id(d) not in moving) for d in seen], bgr.shape[:2])
             window = float(cfg.objects["hit_window_seconds"])
             for d in detections:
                 self._hits[d.label].append(now)
@@ -572,14 +587,14 @@ class Camera:
                         self.event.vehicle_box = max(cars, key=lambda b: (b[2] - b[0]) * (b[3] - b[1]))
                     self._maybe_plates(now, bgr.shape[:2], cars)
 
-    def _log_boxes(self, now: float, detections: list[Detection], shape: tuple[int, int]) -> None:
+    def _log_boxes(self, now: float, detections: list[tuple[Detection, bool]],
+                   shape: tuple[int, int]) -> None:
         """Remember what was detected in this frame, as fractions of the frame (lock already
-        held). Played back as boxes over the clip. A frame without anything is only noted right
-        after one with boxes, so the boxes disappear at the right moment."""
-        h, w = shape
-        boxes = [[d.kind or d.label, d.label, round(d.score, 2),
-                  round(d.box[0] / w, 3), round(d.box[1] / h, 3), round(d.box[2] / w, 3), round(d.box[3] / h, 3)]
-                 for d in detections]
+        held): [kind, label, score, x1, y1, x2, y2, parked]. Played back as boxes over the clip;
+        parked = standing still, so it did not count for the event. A frame without anything is
+        only noted right after one with boxes, so the boxes disappear at the right moment."""
+        boxes = [[d.kind or d.label, d.label, round(d.score, 2), *frac_box(d.box, shape), int(parked)]
+                 for d, parked in detections]
         if not boxes and (not self._recent_boxes or not self._recent_boxes[-1][1]):
             return
         entry = (now, boxes)
@@ -739,6 +754,7 @@ class Camera:
             sy, sx = frame.shape[0] / sub_shape[0], frame.shape[1] / sub_shape[1]
             matches: list[FaceMatch] = []
             too_small: list[int] = []
+            marks = []                         # (time, "face", name, person box) for playback
             searched = []                      # size of each searched area, for the log
             if not boxes:                       # no known person position (doorbell): whole frame
                 matches = self.faces.analyse(frame, too_small)
@@ -753,7 +769,10 @@ class Camera:
                 searched.append(f"{cx2 - cx1}x{cy2 - cy1}")
                 if cx2 - cx1 < 40 or cy2 - cy1 < 40:
                     continue
-                matches += self.faces.analyse(frame[cy1:cy2, cx1:cx2], too_small)
+                found = self.faces.analyse(frame[cy1:cy2, cx1:cx2], too_small)
+                matches += found
+                marks += [(time.monotonic(), "face", m.name or "", frac_box((x1, y1, x2, y2), sub_shape))
+                          for m in found]
             if not matches:
                 # say why, so a camera that never yields faces can be adjusted
                 why = (f"face too small ({max(too_small)} px, needs {MIN_FACE_PX})" if too_small
@@ -766,6 +785,7 @@ class Camera:
                 if ev is not None:
                     # keep all attempts together (best images first); the choice is made per person
                     ev.faces = sorted(ev.faces + matches, key=lambda m: -m.quality)[:16]
+                    ev.marks = (ev.marks + marks)[-200:]
                     matches = ev.faces
             groups = summarize(matches, self.faces.backend.group)
             known = next((g for g in groups if g.name), None)
@@ -841,6 +861,7 @@ class Camera:
                 return
             sy, sx = frame.shape[0] / sub_shape[0], frame.shape[1] / sub_shape[1]
             reads: list[PlateRead] = []
+            marks = []
             for x1, y1, x2, y2 in boxes:
                 bw, bh = x2 - x1, y2 - y1
                 cx1 = int(max(0, (x1 - 0.1 * bw) * sx))
@@ -848,7 +869,10 @@ class Camera:
                 cy1 = int(max(0, (y1 - 0.1 * bh) * sy))
                 cy2 = int(min(frame.shape[0], (y2 + 0.1 * bh) * sy))
                 if cx2 - cx1 >= 60 and cy2 - cy1 >= 40:
-                    reads += self.plates.read(frame[cy1:cy2, cx1:cx2])
+                    found = self.plates.read(frame[cy1:cy2, cx1:cx2])
+                    reads += found
+                    marks += [(time.monotonic(), "plate", r.plate, frac_box((x1, y1, x2, y2), sub_shape))
+                              for r in found]
             if not reads:
                 return
             with self._lock:
@@ -856,6 +880,7 @@ class Camera:
                 if ev is None:
                     return
                 ev.plates = (ev.plates + reads)[-12:]
+                ev.marks = (ev.marks + marks)[-200:]
                 best = vote(ev.plates)
             name = self.plates.name_of(best.plate)
             log.info("[%s] plate: %s%s (%.2f)", self.name, best.plate,
@@ -1160,7 +1185,7 @@ class Camera:
         shutil.move(str(part), str(mp4))
         clip_start = self.recorder.clip_starts.pop(ev.id, None)
         if ev.boxes and clip_start is not None:
-            timeline = boxes_timeline(ev.boxes, clip_start, duration)
+            timeline = boxes_timeline(ev.boxes, clip_start, duration, ev.marks)
             if timeline["frames"]:
                 mp4.with_suffix(".boxes").write_text(json.dumps(timeline, separators=(",", ":")))
         plates = []
