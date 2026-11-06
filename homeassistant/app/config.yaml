@@ -1,6 +1,6 @@
 # Uitkijk as a Home Assistant app (add-on). See DOCS.md in this folder.
 name: Uitkijk
-version: "0.4.2"
+version: "0.4.3"
 slug: uitkijk
 description: Local camera system with recordings, detection (CPU or Google Coral) and face/plate recognition
 url: https://github.com/jeroensexperiment/uitkijk

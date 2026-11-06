@@ -590,7 +590,8 @@
       $("filterToggle").innerHTML = `Filter${active ? ` <b>${active}</b>` : ""}`;
       $("camChips").innerHTML = [{ name: null, friendly_name: "All cameras" }, ...state.cams].map((c) =>
         `<button class="chip" data-cam="${esc(c.name ?? "")}" aria-pressed="${state.camera === c.name}">${esc(c.friendly_name)}</button>`).join("");
-      $("labelChips").innerHTML = [[null, { name: "All" }], ...Object.entries(LABELS)].map(([k, l]) =>
+      const labels = Object.entries(LABELS).filter(([k]) => k !== "doorbell" || state.hasDoorbell || state.label === k);
+      $("labelChips").innerHTML = [[null, { name: "All" }], ...labels].map(([k, l]) =>
         `<button class="chip" data-label="${k ?? ""}" aria-pressed="${state.label === k}">${k ? `<span class="sw" style="background:${l.color}"></span>` : ""}${l.name}</button>`).join("");
       const people = Object.keys(state.faces.people);
       const cars = Object.entries(state.plates.known);
@@ -1155,6 +1156,10 @@
     }
 
     // ---------- licence plates ----------
+    // the Doorbell filter only once there has been a doorbell event (a ring via HA)
+    async function loadDoorbell() {
+      try { state.hasDoorbell = (await api("api/events?label=doorbell&limit=1")).total > 0; } catch {}
+    }
     async function loadPlates() {
       try { state.plates = await api("api/plates"); } catch {}
     }
@@ -1394,7 +1399,7 @@
     // ---------- start and refresh ----------
     (async () => {
       try { state.auth = await api("api/auth/state"); } catch {}
-      await Promise.all([loadFaces(), loadPlates()]);
+      await Promise.all([loadFaces(), loadPlates(), loadDoorbell()]);
       await loadStatus();
       renderChips();
       await loadEvents();
