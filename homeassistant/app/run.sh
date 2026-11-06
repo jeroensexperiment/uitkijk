@@ -1,6 +1,8 @@
 #!/bin/sh
 # Start go2rtc and the service. Runs as root: the Coral (USB) and /dev/dri need no extra groups.
 mkdir -p /data/state /data/models /config/go2rtc "$CAMSVC_CLIPS"
+# which app version and source commit this is (to check an update really arrived)
+echo "Uitkijk app $(cat /opt/camera-service/SOURCE_VERSION 2>/dev/null || echo '(version unknown)')"
 
 # config.yaml used to be in /data (not visible in HA); move it once to /config (= /addon_configs)
 if [ ! -f /config/config.yaml ] && [ -f /data/config.yaml ]; then

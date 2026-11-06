@@ -6,8 +6,13 @@
 FROM python:3.11-slim-bookworm AS src
 ARG UITKIJK_REPO=https://github.com/jeroensexperiment/uitkijk.git
 ARG UITKIJK_REF=main
+# The Supervisor passes the app version. Using it here makes Docker fetch the source again for
+# every new version; otherwise it would reuse the clone of the first build (same command line).
+ARG BUILD_VERSION=dev
 RUN apt-get update -qq && apt-get install -y -qq --no-install-recommends git ca-certificates \
- && git clone --depth 1 --branch "$UITKIJK_REF" "$UITKIJK_REPO" /src
+ && echo "Fetching the source for app version $BUILD_VERSION" \
+ && git clone --depth 1 --branch "$UITKIJK_REF" "$UITKIJK_REPO" /src \
+ && echo "$BUILD_VERSION $(git -C /src rev-parse --short HEAD)" > /src/SOURCE_VERSION
 
 # --- object models ---------------------------------------------------------------------------
 # CPU and iGPU: YOLO11n (ONNX and OpenVINO), converted once by .github/workflows/models.yml (release
@@ -42,7 +47,7 @@ COPY --from=src /src/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt ai-edge-litert==2.3.0
 COPY --from=model /out/ /opt/camsvc-models/
 COPY --from=src /src/camsvc ./camsvc
-COPY --from=src /src/config.example.yaml ./
+COPY --from=src /src/config.example.yaml /src/SOURCE_VERSION ./
 COPY run.sh /run.sh
 RUN chmod +x /run.sh
 CMD ["/run.sh"]
