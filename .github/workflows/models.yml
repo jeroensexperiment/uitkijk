@@ -1,8 +1,9 @@
-# Builds the object models once and publishes them as the release "models":
-#   yolo11n.onnx            (CPU, ONNX Runtime)
-#   yolo11n_edgetpu.tflite  (Google Coral)
-#   export.log              (the full conversion output, also when it fails)
-# The Home Assistant app downloads them from there instead of converting during installation.
+# Builds the CPU object model once and publishes it as the release "models":
+#   yolo11n.onnx  (ONNX Runtime, CPU)
+#   export.log    (the full conversion output, also when it fails)
+# The Home Assistant app downloads it from there instead of converting during installation.
+# The Coral uses Google's ready-made SSDLite MobileDet model: a YOLO model for the Edge TPU needs
+# the Edge TPU compiler 16, which is no longer published (the one on GitHub, 14.1, crashes on it).
 name: Models
 on:
   workflow_dispatch:
@@ -18,31 +19,17 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - name: Edge TPU compiler (Google's package source is gone; the binaries are on GitHub)
-        run: |
-          git clone --depth 1 --filter=blob:none --sparse https://github.com/google-coral/edgetpu "$RUNNER_TEMP/edgetpu"
-          git -C "$RUNNER_TEMP/edgetpu" sparse-checkout set compiler/x86_64
-          echo "$RUNNER_TEMP/edgetpu/compiler/x86_64" >> "$GITHUB_PATH"
       - name: Export
         run: |
           mkdir -p out work && cd work
+          set -o pipefail
           {
-            set -x
-            edgetpu_compiler --version
+            set -ex
             pip install --index-url https://download.pytorch.org/whl/cpu torch torchvision
             pip install ultralytics onnx onnxslim
             yolo export model=yolo11n.pt format=onnx imgsz=320 opset=17 simplify=True
             cp yolo11n.onnx ../out/
-            # the compiler from GitHub (14.1) lacks the --search_delegate option Ultralytics passes:
-            # let Ultralytics make the int8 model and compile it here
-            yolo export model=yolo11n.pt format=edgetpu imgsz=320 || true
-            q="$(find . -name "*_full_integer_quant.tflite" | head -1)"
-            edgetpu_compiler --show_operations --out_dir edgetpu "$q"
-            cp edgetpu/*_edgetpu.tflite ../out/yolo11n_edgetpu.tflite
-            cat edgetpu/*.log || true
-          } > ../out/export.log 2>&1 || { tail -80 ../out/export.log; exit 1; }
-          tail -30 ../out/export.log
-          ls -l ../out
+          } 2>&1 | tee ../out/export.log
       - name: Publish
         if: always()
         env:
@@ -51,4 +38,5 @@ jobs:
           gh release view models -R "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
             || gh release create models -R "$GITHUB_REPOSITORY" --title "Object models" \
                  --notes "Built by .github/workflows/models.yml; used by the Home Assistant app."
+          gh release delete-asset models yolo11n_edgetpu.tflite -y -R "$GITHUB_REPOSITORY" 2>/dev/null || true
           gh release upload models out/* --clobber -R "$GITHUB_REPOSITORY"

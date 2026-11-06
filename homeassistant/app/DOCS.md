@@ -23,8 +23,8 @@ machine). What is different:
 
 1. Settings → Apps (Add-ons) → App store → ⋮ → Repositories → add
    `https://github.com/jeroensexperiment/uitkijk`.
-2. Install **Uitkijk**. The first build takes a while (15–30 minutes): the object model is converted
-   for the CPU and for the Coral.
+2. Install **Uitkijk**. The first build takes a few minutes; the object models (CPU and Coral) are
+   downloaded ready-made from the release "models" of this repository.
 3. Start it and open **Uitkijk** in the sidebar: the setup wizard appears.
 
 The web page is also on `http://<ip-of-HA>:8080` on your home network, as before. Notifications from
