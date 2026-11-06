@@ -327,8 +327,9 @@ class FaceRecognizer:
         return True
 
     # ------------------------------------------------------------------ recognition
-    def analyse(self, bgr: np.ndarray) -> list[FaceMatch]:
-        """All faces in a (cropped) image, with the best matching name."""
+    def analyse(self, bgr: np.ndarray, too_small: list[int] | None = None) -> list[FaceMatch]:
+        """All faces in a (cropped) image, with the best matching name. Faces that are too small
+        are skipped; their size in pixels is added to `too_small` (for the log)."""
         h, w = bgr.shape[:2]
         scale = min(1.0, DETECT_MAX_SIDE / max(h, w))
         small = cv2.resize(bgr, (int(w * scale), int(h * scale))) if scale < 1 else bgr
@@ -342,6 +343,8 @@ class FaceRecognizer:
             face = face.copy()
             face[:14] /= scale                       # back to coordinates of bgr
             if min(face[2], face[3]) < MIN_FACE_PX:
+                if too_small is not None:
+                    too_small.append(int(min(face[2], face[3])))
                 continue
             with self._lock:
                 aligned = self._sface.alignCrop(bgr, face)

@@ -21,7 +21,7 @@ import numpy as np
 from .config import CameraConfig
 from .detector import Detection, ObjectDetector, draw_detections
 from .events import EventRecord, EventStore, clip_paths
-from .faces import FaceMatch, FaceRecognizer, summarize
+from .faces import MIN_FACE_PX, FaceMatch, FaceRecognizer, summarize
 from .motion import MotionDetector, build_mask, motion_region, point_masked, zones_at
 from .plates import PlateRead, PlateReader, vote
 from .recorder import RTSP_OPTIONS, MainRecorder
@@ -711,6 +711,10 @@ class Camera:
         """Start face recognition in the background (lock already held)."""
         ev = self.event
         fcfg = self.cfg.settings["faces"]
+        if self.faces is None and fcfg.get("enabled") and not getattr(self, "_faces_off_noted", False):
+            self._faces_off_noted = True
+            log.info("[%s] face recognition is on for this camera, but the face models are not loaded "
+                     "(yet); see the log for 'Face models'", self.name)
         if (self.faces is None or ev is None or not boxes or self._face_busy
                 or ev.face_attempts >= int(fcfg["attempts"])
                 or now - ev.last_face_try < float(fcfg["interval_seconds"])
@@ -734,8 +738,11 @@ class Camera:
                 return
             sy, sx = frame.shape[0] / sub_shape[0], frame.shape[1] / sub_shape[1]
             matches: list[FaceMatch] = []
+            too_small: list[int] = []
+            searched = []                      # size of each searched area, for the log
             if not boxes:                       # no known person position (doorbell): whole frame
-                matches = self.faces.analyse(frame)
+                matches = self.faces.analyse(frame, too_small)
+                searched.append(f"{frame.shape[1]}x{frame.shape[0]}")
             for x1, y1, x2, y2 in boxes:
                 # upper part of the person, slightly wider: that is where the head is
                 bw, bh = x2 - x1, y2 - y1
@@ -743,10 +750,16 @@ class Camera:
                 cx2 = int(min(frame.shape[1], (x2 + 0.2 * bw) * sx))
                 cy1 = int(max(0, (y1 - 0.1 * bh) * sy))
                 cy2 = int(min(frame.shape[0], (y1 + 0.6 * bh) * sy))
+                searched.append(f"{cx2 - cx1}x{cy2 - cy1}")
                 if cx2 - cx1 < 40 or cy2 - cy1 < 40:
                     continue
-                matches += self.faces.analyse(frame[cy1:cy2, cx1:cx2])
+                matches += self.faces.analyse(frame[cy1:cy2, cx1:cx2], too_small)
             if not matches:
+                # say why, so a camera that never yields faces can be adjusted
+                why = (f"face too small ({max(too_small)} px, needs {MIN_FACE_PX})" if too_small
+                       else "no face found (turned away, too dark or too far)")
+                log.info("[%s] face search: %s; searched %s px of the %dx%d image",
+                         self.name, why, ", ".join(searched) or "nothing", frame.shape[1], frame.shape[0])
                 return
             with self._lock:
                 ev = self.event if self.event and self.event.id == event_id else None
