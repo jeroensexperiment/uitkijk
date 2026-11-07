@@ -110,6 +110,16 @@ def head_region(box: tuple[int, int, int, int], sx: float, sy: float,
     return left, top, int(min(w, left + side)), int(min(h, top + side))
 
 
+def face_size_estimate(box: tuple[int, int, int, int], sub_shape: tuple[int, int],
+                       main_shape: tuple[int, int]) -> float:
+    """Rough size in px of the face of a person (box on the sub stream) on the main-stream image:
+    about a seventh of a whole body, or a third of the width (also when only the upper body is
+    in view, e.g. behind a hedge)."""
+    x1, y1, x2, y2 = box
+    sy, sx = main_shape[0] / sub_shape[0], main_shape[1] / sub_shape[1]
+    return max((y2 - y1) * sy / 7, (x2 - x1) * sx / 3)
+
+
 def boxes_timeline(entries: list, clip_start: float, duration: float, marks: list | None = None) -> dict:
     """The boxes of an event for playback: times in seconds from the start of the clip (which
     begins with the pre-buffer). Stored next to the clip as <clip>.boxes.
@@ -170,6 +180,7 @@ class ActiveEvent:
     faces: list[FaceMatch] = field(default_factory=list)
     face_attempts: int = 0
     last_face_try: float = 0.0
+    face_best_size: float = 0.0           # largest estimated face (px) at an attempt so far
     plates: list[PlateRead] = field(default_factory=list)
     ai_requested: bool = False
     zones: set[str] = field(default_factory=set)
@@ -228,6 +239,7 @@ class Camera:
         self._last_object: dict[str, float] = {lbl: 0.0 for lbl in self.object_active}
         # the last analysed frames, so a new event also gets the boxes from just before it started
         self._recent_boxes: deque = deque(maxlen=BOX_HISTORY)
+        self._main_shape: tuple[int, int] = (1080, 1920)   # main-stream size, known after a face search
         self._hits: dict[str, deque[float]] = {lbl: deque() for lbl in self.object_active}
         self._tracks: list[Track] = []
         self._tracks_file = state_dir / f"stationary_{cfg.name}.json"
@@ -749,10 +761,19 @@ class Camera:
             log.info("[%s] face recognition is on for this camera, but the face models are not loaded "
                      "(yet); see the log for 'Face models'", self.name)
         if (self.faces is None or ev is None or not boxes or self._face_busy
-                or ev.face_attempts >= int(fcfg["attempts"])
                 or now - ev.last_face_try < float(fcfg["interval_seconds"])
                 or any(f.name and f.score >= self.faces.backend.learn for f in ev.faces)):
             return                  # only stop once someone is recognised with confidence
+        # Only try when a face could be large enough: someone walking up from far away would
+        # otherwise use up all attempts before being close. Once the attempts are used up, someone
+        # who came clearly closer (a larger face) still gets a few more.
+        size = max(face_size_estimate(b, sub_shape, self._main_shape) for b in boxes)
+        if size < MIN_FACE_PX * 0.8:
+            return
+        limit = int(fcfg["attempts"])
+        if ev.face_attempts >= limit and (ev.face_attempts >= 2 * limit or size < 1.4 * ev.face_best_size):
+            return
+        ev.face_best_size = max(ev.face_best_size, size)
         ev.face_attempts += 1
         ev.last_face_try = now
         self._face_busy = True
@@ -769,6 +790,7 @@ class Camera:
                 frame = self.latest_bgr.copy()
             if frame is None:
                 return
+            self._main_shape = frame.shape[:2]
             sy, sx = frame.shape[0] / sub_shape[0], frame.shape[1] / sub_shape[1]
             matches: list[FaceMatch] = []
             too_small: list[int] = []

@@ -75,3 +75,11 @@ def test_event_writes_boxes_next_to_the_clip(tmp_path):
     assert 4.9 <= first_t <= 11.1
     assert first_boxes[0][:3] == ["person", "person", 0.9]
     assert first_boxes[0][3:7] == [round(100 / 640, 3), round(50 / 360, 3), 0.25, round(300 / 360, 3)]
+
+
+def test_face_size_estimate():
+    from camsvc.camera import face_size_estimate
+    # far away: 20x60 px on a 640x360 sub stream, 1920x1080 main -> face ~26 px: not yet worth a try
+    assert face_size_estimate((300, 100, 320, 160), (360, 640), (1080, 1920)) < 30
+    # close by, upper body behind a hedge: wide box -> face well over 36 px
+    assert face_size_estimate((200, 50, 290, 200), (360, 640), (1080, 1920)) >= 80
