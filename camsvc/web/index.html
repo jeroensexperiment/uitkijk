@@ -913,7 +913,8 @@
         ctx.setLineDash([]);
         let extra = "";
         if (label === "person") {
-          extra = markFor("face", [x1, y1, x2, y2], v.currentTime) || who;
+          const m = markFor("face", [x1, y1, x2, y2], v.currentTime);
+          extra = m && m !== "unknown face" ? m : who || m;     // a name beats "unknown face"
         } else if (label === "vehicle" && kind !== "bicycle") {
           const p = markFor("plate", [x1, y1, x2, y2], null);
           extra = p ? (state.plates.known[p] ? `${state.plates.known[p]} (${p})` : p) : "";
@@ -938,11 +939,13 @@
     // the face (within 2 s: people move); the text read most often wins
     function markFor(kind, box, t) {
       const count = {};
+      let unnamed = false;            // a face was found here, but nobody recognised (yet)
       for (const [mt, mk, text, mb] of boxes.marks || []) {
-        if (mk !== kind || !text || (t != null && Math.abs(mt - t) > 2) || overlap(box, mb) < 0.3) continue;
+        if (mk !== kind || (t != null && Math.abs(mt - t) > 2) || overlap(box, mb) < 0.3) continue;
+        if (!text) { unnamed = true; continue; }
         count[text] = (count[text] || 0) + 1;
       }
-      return Object.keys(count).sort((a, b) => count[b] - count[a])[0] || "";
+      return Object.keys(count).sort((a, b) => count[b] - count[a])[0] || (unnamed ? "unknown face" : "");
     }
     $("pBoxesBtn").addEventListener("click", () => {
       boxes.on = !boxes.on;
