@@ -168,6 +168,10 @@
     dialog:has(#pFaces:not(:empty)):has(#pPlates:not(:empty)) video { max-height: calc(100dvh - 400px); }
     dialog:has(#pAi:not(:empty)) video { max-height: calc(100dvh - 330px); }
     .pv-wrap { position: relative; }
+    img[data-zoom] { cursor: zoom-in; }
+    .zoom-body { display: grid; justify-items: center; gap: .8rem; padding: 1rem; }
+    .zoom-face { width: min(16rem, 70vw); aspect-ratio: 1; object-fit: cover; border-radius: var(--me-radius-card); border: 1px solid var(--me-border-strong); background: var(--me-bg); }
+    .zoom-ctx { width: 100%; max-height: 55dvh; object-fit: contain; border-radius: var(--me-radius-sm); background: var(--me-bg); }
     .pv-boxes { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
     /* AI description */
     .ai-box { padding: .8rem 1rem; border-top: 1px solid var(--me-border); display: grid; gap: .45rem; }
@@ -439,6 +443,24 @@
       </button>
     </div>
     <iframe class="live-frame" id="liveFrame" title="Live camera view" allow="autoplay; fullscreen"></iframe>
+  </dialog>
+
+  <dialog id="zoomDlg" aria-labelledby="zoomTitle">
+    <div class="player-head">
+      <div><h3 id="zoomTitle">Face</h3><div class="muted" id="zoomSub"></div></div>
+      <button class="icon-btn" data-dlg-close="zoomDlg" aria-label="Close">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </button>
+    </div>
+    <div class="zoom-body">
+      <img id="zoomFace" class="zoom-face" alt="">
+      <img id="zoomCtx" class="zoom-ctx" alt="The moment this face was seen" hidden>
+      <video id="zoomVideo" class="zoom-ctx" controls playsinline hidden></video>
+    </div>
+    <div class="player-foot" id="zoomFoot" hidden>
+      <span class="muted">The moment this face was seen</span>
+      <button class="btn" id="zoomPlay">Play the clip</button>
+    </div>
   </dialog>
 
   <dialog id="manageDlg" aria-labelledby="manageTitle">
@@ -947,7 +969,7 @@
       const names = Object.keys(state.faces.people);
       el.innerHTML = e.faces.map((f, k) => `
         <div class="face${f.name ? " known" : ""}">
-          <img src="clips/${encodeURI(f.crop)}" alt="">
+          <img src="clips/${encodeURI(f.crop)}" alt="Face, click to enlarge" data-zoom data-crop="${esc(f.crop)}" data-title="${f.name ? esc(f.name) : "Unknown face"}">
           <span class="nm">${f.name ? esc(f.name) : "Unknown"}</span>
           <select data-face="${k}" aria-label="Who is this?">
             <option value="">${f.name ? "Someone else…" : "Who is this?"}</option>
@@ -982,7 +1004,7 @@
       return `<h4>Unknown faces</h4>
         <div class="unknowns">${unknownGroups.slice(0, 40).map((g, k) => `
           <div class="ugroup">
-            <div class="samples">${g.samples.map((id) => `<img src="api/unknown-faces/${id}.jpg" alt="" loading="lazy">`).join("")}</div>
+            <div class="samples">${g.samples.map((id, j) => `<img src="api/unknown-faces/${id}.jpg" alt="Unknown face, click to enlarge" loading="lazy" data-zoom data-crop="${esc(g.crops?.[j] || "")}" data-title="Unknown face" data-sub="Seen ${g.count}× · ${esc(g.cameras.map(camName).join(", "))}">`).join("")}</div>
             <div class="meta"><b>Seen ${g.count}×</b> · ${g.first.slice(0, 10) === g.last.slice(0, 10) ? `${fmtDay(g.last)} ${fmtTime(g.last)}` : `${fmtDay(g.first)} – ${fmtDay(g.last)}`} · ${g.cameras.map((c) => esc(camName(c))).join(", ")}
               ${g.suggest ? `<br><span class="hint">Looks like ${esc(g.suggest)}</span>` : ""}</div>
             <div class="row">
@@ -999,7 +1021,7 @@
       }
       const people = Object.entries(state.faces.people);
       const auto = state.faces.auto || {};
-      const sample = (name, id, isAuto) => `<div class="sample${isAuto ? " auto" : ""}"><img src="api/faces/${encodeURIComponent(name)}/${isAuto ? "auto/" : ""}${id}.jpg" alt="">
+      const sample = (name, id, isAuto) => `<div class="sample${isAuto ? " auto" : ""}"><img src="api/faces/${encodeURIComponent(name)}/${isAuto ? "auto/" : ""}${id}.jpg" alt="${esc(name)}, click to enlarge" data-zoom data-title="${esc(name)}" data-sub="${isAuto ? "Learned automatically" : "Named by you"}">
             <button data-del="${esc(name)}|${isAuto ? "auto/" : ""}${id}" aria-label="Remove photo">✕</button></div>`;
       $("people").innerHTML = renderUnknown() + (people.length ? people.map(([name, ids]) => {
         const autos = auto[name] || [];
@@ -1344,7 +1366,34 @@
     });
 
     // ---------- interaction ----------
+    // ---------- a face enlarged, with the moment it was seen ----------
+    function openZoom(img) {
+      $("zoomTitle").textContent = img.dataset.title || "Face";
+      $("zoomSub").textContent = img.dataset.sub || "";
+      // the face image of an event is <clip base>.face1.jpg, with a larger <clip base>.face1.view.jpg
+      // next to it (from 0.5.7); the snapshot is <base>.jpg, the clip <base>.mp4
+      const crop = img.dataset.crop || "";
+      const face = $("zoomFace");
+      face.onerror = () => { face.onerror = null; face.src = img.src; };
+      face.src = crop ? `clips/${encodeURI(crop.replace(/\.jpg$/, ".view.jpg"))}` : img.src;
+      const base = crop.replace(/\.face\d+\.jpg$/, "");
+      const ctx = $("zoomCtx"), vid = $("zoomVideo");
+      vid.pause(); vid.removeAttribute("src"); vid.hidden = true;
+      ctx.hidden = !base; $("zoomFoot").hidden = !base;
+      if (base) {
+        ctx.onerror = () => { ctx.hidden = true; };
+        ctx.src = `clips/${encodeURI(base)}.jpg`;
+        $("zoomPlay").onclick = () => {
+          ctx.hidden = true; $("zoomFoot").hidden = true;
+          vid.src = `clips/${encodeURI(base)}.mp4`; vid.hidden = false; vid.play().catch(() => {});
+        };
+      }
+      $("zoomDlg").showModal();
+    }
+    $("zoomDlg").addEventListener("close", () => { const v = $("zoomVideo"); v.pause(); v.removeAttribute("src"); });
     document.addEventListener("click", (ev) => {
+      const zi = ev.target.closest("img[data-zoom]");
+      if (zi) { openZoom(zi); return; }
       if (ev.target.closest("#openManage")) { renderManage(); $("manageDlg").showModal(); return; }
       if (ev.target.closest("#openConfig")) { $("manageDlg").close(); openConfig(); return; }
       // opening another dialog from Manage: close Manage first

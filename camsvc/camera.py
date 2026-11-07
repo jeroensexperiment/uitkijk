@@ -1216,6 +1216,8 @@ class Camera:
         for i, g in enumerate(groups, 1):
             crop = day_dir / f"{base}.face{i}.jpg"
             crop.write_bytes(g.best.crop_jpg)
+            if g.best.view_jpg:             # larger image, for clicking the face on the web page
+                crop.with_suffix(".view.jpg").write_bytes(g.best.view_jpg)
             faces.append({"crop": str(crop.relative_to(self.clips_dir)), "name": g.name,
                           "score": g.score, "quality": g.best.quality})
         snap_rel = None

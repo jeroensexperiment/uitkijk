@@ -116,3 +116,17 @@ def test_face_answer_from_notification(tmp_path):
     Service._on_face_answer(svc, other, None, True)
     assert rec.unknown.count() == 0
     Service._on_face_answer(svc, "000000000000", "Sam", False)     # already handled: no error
+
+
+def test_face_view_is_a_larger_crop_around_the_face():
+    import cv2
+    import numpy as np
+
+    from camsvc.faces import face_view
+    img = np.zeros((1080, 1920, 3), np.uint8)
+    face = np.array([900, 400, 60, 70] + [0] * 11, np.float32)      # x, y, w, h of the face
+    view = cv2.imdecode(np.frombuffer(face_view(img, face), np.uint8), cv2.IMREAD_COLOR)
+    assert view.shape[:2] == (140, 140)                               # twice the face, not scaled up
+    big = np.array([0, 0, 600, 600] + [0] * 11, np.float32)
+    view = cv2.imdecode(np.frombuffer(face_view(img, big), np.uint8), cv2.IMREAD_COLOR)
+    assert max(view.shape[:2]) == 320                                 # at most VIEW_SIDE

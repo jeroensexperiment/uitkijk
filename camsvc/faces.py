@@ -40,6 +40,7 @@ AUTO_QUALITY = 0.5        # only learn good images ...
 AUTO_MARGIN = 0.15        # ... that clearly belong to one person
 AUTO_DUPLICATE = 0.85     # already this similar to an existing photo: adds nothing
 UNKNOWN_QUALITY = 0.2     # do not keep worse unknown faces
+VIEW_SIDE = 320           # px of the larger face image shown when clicking a face
 UNKNOWN_MAX = 400
 UNKNOWN_KEEP_DAYS = 30
 ASSIGN_MAX = 8            # this many of the best photos are kept when naming
@@ -68,6 +69,7 @@ class FaceMatch:
     quality: float = 0.0      # 0-1: size, sharpness and how frontal
     margin: float = 0.0       # lead over the best other person
     embedding: np.ndarray | None = field(default=None, repr=False)
+    view_jpg: bytes | None = field(default=None, repr=False)   # wider, sharper crop, only to look at
 
 
 @dataclass
@@ -94,6 +96,24 @@ def face_quality(face: np.ndarray, aligned: np.ndarray) -> float:
     conf = np.clip((face[14] - 0.7) / 0.3, 0, 1)    # YuNet keeps faces from 0.7
     q = (0.3 + 0.7 * size) * (0.3 + 0.7 * sharp) * (0.2 + 0.8 * frontal) * (0.6 + 0.4 * conf)
     return round(float(q), 3)
+
+
+def face_view(bgr: np.ndarray, face: np.ndarray, side: int = VIEW_SIDE) -> bytes | None:
+    """The face with some head and shoulders around it, straight from the (sharp) image, at most
+    `side` px. Only for looking at it larger on the web page; recognition uses the aligned crop."""
+    x, y, w, h = (float(v) for v in face[:4])
+    cx, cy, half = x + w / 2, y + h / 2, max(w, h)            # twice the face size
+    H, W = bgr.shape[:2]
+    x1, y1 = int(max(0, cx - half)), int(max(0, cy - half))
+    x2, y2 = int(min(W, cx + half)), int(min(H, cy + half))
+    if x2 - x1 < 8 or y2 - y1 < 8:
+        return None
+    crop = bgr[y1:y2, x1:x2]
+    scale = side / max(crop.shape[:2])
+    if scale < 1:
+        crop = cv2.resize(crop, (int(crop.shape[1] * scale), int(crop.shape[0] * scale)), interpolation=cv2.INTER_AREA)
+    ok, buf = cv2.imencode(".jpg", crop, [cv2.IMWRITE_JPEG_QUALITY, 90])
+    return buf.tobytes() if ok else None
 
 
 def summarize(matches: list[FaceMatch], group_threshold: float, limit: int = 4) -> list[FaceGroup]:
@@ -354,7 +374,7 @@ class FaceRecognizer:
             if not ok:
                 continue
             out.append(FaceMatch(name, score, buf.tobytes(), face_quality(face, aligned),
-                                 margin, emb))
+                                 margin, emb, face_view(bgr, face)))
         return out
 
 
@@ -463,6 +483,7 @@ class UnknownFaces:
             out.append({
                 "ids": [ids[i] for i in members],
                 "samples": [ids[i] for i in members[:6]],
+                "crops": [items[ids[i]].get("crop") for i in members[:6]],   # face image in the clip
                 "count": len(members),
                 "first": times[0], "last": times[-1],
                 "cameras": sorted({items[ids[i]]["camera"] for i in members}),
