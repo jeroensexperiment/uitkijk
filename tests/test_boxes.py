@@ -83,3 +83,56 @@ def test_face_size_estimate():
     assert face_size_estimate((300, 100, 320, 160), (360, 640), (1080, 1920)) < 30
     # close by, upper body behind a hedge: wide box -> face well over 36 px
     assert face_size_estimate((200, 50, 290, 200), (360, 640), (1080, 1920)) >= 80
+
+
+def test_parked_car_plate_read_once_and_put_on_its_box(tmp_path):
+    import time
+
+    import numpy as np
+
+    from camsvc.camera import Camera, Track
+    from camsvc.config import load_config
+    from camsvc.detector import Detection
+    from camsvc.events import EventStore
+    from camsvc.plates import PlateRead
+
+    class FakePlates:
+        reads = 0
+
+        def read(self, crop):
+            FakePlates.reads += 1
+            return [PlateRead("45-HBD-1", 0.9, b"")]
+
+        def name_of(self, plate):
+            return None
+
+    clips, state = tmp_path / "clips", tmp_path / "state"
+    state.mkdir()
+    cfg_file = tmp_path / "config.yaml"
+    cfg_file.write_text(f"storage: {{clips_dir: {clips}, state_dir: {state}}}\n"
+                        "cameras:\n  - name: oprit\n    main_url: rtsp://x/1\n    plates: {enabled: true}\n")
+    cam = Camera(load_config(cfg_file).cameras[0], clips, state, None, EventStore(clips, ""), None, {},
+                 lambda: None, plates=FakePlates())
+    cam.recorder.grab_frame = lambda: np.zeros((1080, 1920, 3), np.uint8)
+    box = (20, 200, 220, 340)
+    cam._tracks = [Track("vehicle", box, 0.0, 100.0)]
+    parked = [Detection("vehicle", 0.9, box, "car")]
+    bgr = np.zeros((360, 640, 3), np.uint8)
+    with cam._lock:
+        cam._trigger(100.0, "person", 0.9, None, bgr, [])
+        cam._maybe_parked_plates(100.0, (360, 640), parked)
+    for _ in range(50):
+        if not cam._plate_busy:
+            break
+        time.sleep(0.05)
+    assert cam._tracks[0].plate == "45-HBD-1"
+    assert [m[1:3] for m in cam.event.marks] == [("plate", "45-HBD-1")]
+    assert cam.event.plates == []                      # not the event's vehicle: no alerts
+    # the next event: on its box straight away, without reading again
+    cam.event = None
+    with cam._lock:
+        cam._trigger(200.0, "person", 0.9, None, bgr, [])
+        cam._maybe_parked_plates(200.0, (360, 640), parked)
+        cam._maybe_parked_plates(200.5, (360, 640), parked)
+    assert FakePlates.reads == 1
+    assert [m[1:3] for m in cam.event.marks] == [("plate", "45-HBD-1")]

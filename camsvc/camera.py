@@ -36,6 +36,7 @@ LABEL_PRIORITY = {"doorbell": 4, "person": 3, "vehicle": 2, "animal": 1, "motion
 # Labels that can stand still without being interesting (parked car, sleeping cat).
 STATIONARY_LABELS = {"vehicle", "animal"}
 STATIONARY_IOU = 0.7      # this much overlap with the previous spot = not moved
+PARKED_PLATE_TRIES = 2    # attempts to read the plate of a parked car (it is remembered with it)
 # Only forget an object after not seeing it at all for this long. Do not count how often the
 # model misses it: at night the confidence hovers around the threshold and a parked car would
 # keep becoming 'new'. A car that leaves or arrives moves and counts normally.
@@ -165,6 +166,8 @@ class Track:
     box: tuple[int, int, int, int]
     first_seen: float
     last_seen: float = 0.0
+    plate: str | None = None     # plate read while it stood still (shown on its box in clips)
+    plate_tries: int = 0
 
 
 @dataclass
@@ -181,6 +184,7 @@ class ActiveEvent:
     face_attempts: int = 0
     last_face_try: float = 0.0
     face_best_size: float = 0.0           # largest estimated face (px) at an attempt so far
+    plated_tracks: set = field(default_factory=set)   # parked cars whose plate is on their box already
     plates: list[PlateRead] = field(default_factory=list)
     ai_requested: bool = False
     zones: set[str] = field(default_factory=set)
@@ -585,6 +589,7 @@ class Camera:
             detections = self._drop_stationary(now, detections, labels)
             counted = {id(d) for d in detections}
             self._log_boxes(now, [(d, id(d) not in counted) for d in seen], bgr.shape[:2])
+            self._maybe_parked_plates(now, bgr.shape[:2], [d for d in seen if id(d) not in counted])
             window = float(cfg.objects["hit_window_seconds"])
             for d in detections:
                 self._hits[d.label].append(now)
@@ -887,6 +892,64 @@ class Camera:
         self._plate_busy = True
         threading.Thread(target=self._plate_job, args=(ev.id, sub_shape, boxes),
                          name=f"plates-{self.name}", daemon=True).start()
+
+    def _maybe_parked_plates(self, now: float, sub_shape: tuple[int, int], parked: list[Detection]) -> None:
+        """(lock already held) Plates of parked cars, as Frigate shows them: read once per parked
+        car (a second try when that fails) and remembered with it, then put on its box in every
+        clip. Only for the boxes: these plates do not count as the event's vehicle and never
+        trigger 'unknown vehicle' alerts."""
+        ev = self.event
+        if ev is None or self.plates is None or not self.cfg.settings["plates"]["enabled"]:
+            return
+        start = None
+        for d in parked:
+            if d.label != "vehicle" or d.kind == "bicycle":
+                continue
+            track = max((t for t in self._tracks if t.label == "vehicle"),
+                        key=lambda t: iou(t.box, d.box), default=None)
+            if track is None or iou(track.box, d.box) < STATIONARY_IOU:
+                continue
+            if track.plate:
+                if id(track) not in ev.plated_tracks:
+                    ev.plated_tracks.add(id(track))
+                    ev.marks.append((now, "plate", track.plate, frac_box(d.box, sub_shape)))
+            elif track.plate_tries < PARKED_PLATE_TRIES and start is None:
+                start = (track, d.box)
+        if start is not None and not self._plate_busy:
+            track, box = start
+            track.plate_tries += 1
+            self._plate_busy = True
+            threading.Thread(target=self._parked_plate_job, args=(track, sub_shape, box),
+                             name=f"plates-{self.name}", daemon=True).start()
+
+    def _parked_plate_job(self, track: Track, sub_shape: tuple[int, int],
+                          box: tuple[int, int, int, int]) -> None:
+        try:
+            frame = self.recorder.grab_frame()
+            if frame is None:
+                return
+            sy, sx = frame.shape[0] / sub_shape[0], frame.shape[1] / sub_shape[1]
+            x1, y1, x2, y2 = box
+            bw, bh = x2 - x1, y2 - y1
+            cx1, cx2 = int(max(0, (x1 - 0.1 * bw) * sx)), int(min(frame.shape[1], (x2 + 0.1 * bw) * sx))
+            cy1, cy2 = int(max(0, (y1 - 0.1 * bh) * sy)), int(min(frame.shape[0], (y2 + 0.1 * bh) * sy))
+            if cx2 - cx1 < 60 or cy2 - cy1 < 40:
+                return
+            reads = self.plates.read(frame[cy1:cy2, cx1:cx2])
+            best = vote(reads) if reads else None
+            if best is None:
+                return
+            with self._lock:
+                track.plate = best.plate
+                ev = self.event
+                if ev is not None:
+                    ev.plated_tracks.add(id(track))
+                    ev.marks.append((time.monotonic(), "plate", best.plate, frac_box(box, sub_shape)))
+            log.info("[%s] plate of a parked car: %s (%.2f)", self.name, best.plate, best.confidence)
+        except Exception:  # noqa: BLE001 - recognition must never disturb the camera
+            log.exception("[%s] reading the plate of a parked car failed", self.name)
+        finally:
+            self._plate_busy = False
 
     def _plate_job(self, event_id: str, sub_shape: tuple[int, int],
                    boxes: list[tuple[int, int, int, int]]) -> None:
