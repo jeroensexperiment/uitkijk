@@ -39,7 +39,7 @@ AUTO_MAX = 20             # automatically learned photos per person (oldest are 
 AUTO_QUALITY = 0.5        # only learn good images ...
 AUTO_MARGIN = 0.15        # ... that clearly belong to one person
 AUTO_DUPLICATE = 0.85     # already this similar to an existing photo: adds nothing
-UNKNOWN_QUALITY = 0.3     # do not keep worse unknown faces
+UNKNOWN_QUALITY = 0.2     # do not keep worse unknown faces
 UNKNOWN_MAX = 400
 UNKNOWN_KEEP_DAYS = 30
 ASSIGN_MAX = 8            # this many of the best photos are kept when naming
@@ -91,7 +91,7 @@ def face_quality(face: np.ndarray, aligned: np.ndarray) -> float:
     rx, ry, lx, ly, nx = face[4], face[5], face[6], face[7], face[8]
     eyes = max(1.0, float(np.hypot(lx - rx, ly - ry)))
     frontal = np.clip(1 - abs(nx - (rx + lx) / 2) / eyes / 0.6, 0, 1)   # nose centred between the eyes
-    conf = np.clip((face[14] - 0.8) / 0.2, 0, 1)
+    conf = np.clip((face[14] - 0.7) / 0.3, 0, 1)    # YuNet keeps faces from 0.7
     q = (0.3 + 0.7 * size) * (0.3 + 0.7 * sharp) * (0.2 + 0.8 * frontal) * (0.6 + 0.4 * conf)
     return round(float(q), 3)
 

@@ -21,7 +21,7 @@ import numpy as np
 from .config import CameraConfig
 from .detector import Detection, ObjectDetector, draw_detections
 from .events import EventRecord, EventStore, clip_paths
-from .faces import DETECT_MAX_SIDE, MIN_FACE_PX, FaceMatch, FaceRecognizer, summarize
+from .faces import DETECT_MAX_SIDE, MIN_FACE_PX, UNKNOWN_QUALITY, FaceMatch, FaceRecognizer, summarize
 from .motion import MotionDetector, build_mask, motion_region, point_masked, zones_at
 from .plates import PlateRead, PlateReader, vote
 from .recorder import RTSP_OPTIONS, MainRecorder
@@ -1320,6 +1320,9 @@ class Camera:
                     recognizer.learn_auto(g)
                 elif not g.name and fcfg.get("collect_unknown", True):
                     sid = recognizer.unknown.add(g.best, self.name, when, f["crop"])
+                    if sid is None:
+                        log.info("[%s] unknown face not kept for naming later: quality %.2f (needs %.2f); "
+                                 "it can still be named in the clip", self.name, g.best.quality, UNKNOWN_QUALITY)
                     group = recognizer.unknown.group_of(sid) if sid else None
                     # ask who it is: the first time and again when someone keeps coming
                     if group and group["count"] in ASK_FACE_AT and self.mqtt:
