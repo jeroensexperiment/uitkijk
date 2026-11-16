@@ -58,6 +58,7 @@ def test_event_writes_boxes_next_to_the_clip(tmp_path):
     cfg = load_config(cfg_file)
     cam = Camera(cfg.cameras[0], clips, state, FakeDetector(), EventStore(clips, ""), None, {}, lambda: None)
     bgr = np.zeros((360, 640, 3), np.uint8)
+    bgr[..., 2] = 90                                     # colour: daytime (black-and-white = night)
     t0 = 1000.0
     for i in range(12):                                  # 6 s of frames with motion and a person
         cam._on_frame(t0 + i * 0.5, True, bgr)
@@ -102,6 +103,9 @@ def test_parked_car_plate_read_once_and_put_on_its_box(tmp_path):
         def read(self, crop):
             FakePlates.reads += 1
             return [PlateRead("45-HBD-1", 0.9, b"")]
+
+        def known_plate(self, plate):
+            return None
 
         def name_of(self, plate):
             return None

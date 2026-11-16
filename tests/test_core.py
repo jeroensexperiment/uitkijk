@@ -829,16 +829,17 @@ def test_face_search_continues_until_everyone_in_view_is_known():
     from types import SimpleNamespace
     from camsvc.camera import Camera
     started = []
-    ev = SimpleNamespace(faces=[SimpleNamespace(name="Alex", score=0.5)], face_attempts=1, last_face_try=0.0, id="e1")
+    ev = SimpleNamespace(faces=[SimpleNamespace(name="Alex", score=0.5)], face_attempts=1, last_face_try=0.0, id="e1",
+                         face_best_size=0.0)
     cam = SimpleNamespace(faces=SimpleNamespace(backend=SimpleNamespace(learn=0.38)), event=ev, _face_busy=False,
                           cfg=SimpleNamespace(settings={"faces": {"attempts": 8, "interval_seconds": 1.0}}),
                           name="driveway", _face_job=lambda *a: started.append(a))
     orig = threading.Thread
     threading.Thread = lambda target, args, **k: SimpleNamespace(start=lambda: target(*args))
     try:
-        Camera._maybe_faces(cam, 5.0, (360, 640), [(0, 0, 10, 10)])                    # only Alex: done
+        Camera._maybe_faces(cam, 5.0, (360, 640), [(0, 0, 60, 200)])                   # only Alex: done
         assert not started
-        Camera._maybe_faces(cam, 5.0, (360, 640), [(0, 0, 10, 10), (20, 0, 30, 10)])   # someone joins
+        Camera._maybe_faces(cam, 5.0, (360, 640), [(0, 0, 60, 200), (100, 0, 160, 200)])   # someone joins
         assert len(started) == 1 and ev.face_attempts == 2
     finally:
         threading.Thread = orig
