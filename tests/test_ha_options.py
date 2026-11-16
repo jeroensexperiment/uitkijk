@@ -64,16 +64,20 @@ def test_detector_choice(tmp_path, monkeypatch):
     # no iGPU model in the image: gpu becomes the CPU
     m = ha_options.model_config("gpu", {})
     assert m["path"].endswith(".onnx") and m["coral_path"] == "" and "fallback_path" not in m
-    (tmp_path / "yolo11n.xml").write_text("x")
-    m = ha_options.model_config("gpu", {"input_size": 320})
-    assert m["path"] == "/data/models/yolo11n.xml" and m["device"] == "GPU"
+    (tmp_path / "yolo11s_640.xml").write_text("x")
+    # gpu: YOLO11s at 640 on the whole frame, 320 on the crops, YOLO11n on the CPU as fallback
+    m = ha_options.model_config("gpu", {"input_size": 320, "path": "/old.onnx"})
+    assert m["path"] == "/data/models/yolo11s_640.xml" and m["input_size"] == 640 and m["device"] == "GPU"
+    assert m["zoom_path"] == "/data/models/yolo11s.xml" and m["zoom_input_size"] == 320 and m["gpu_only"]
     assert m["fallback_path"] == "/data/models/yolo11n.onnx" and m["coral_path"] == ""
+    # auto: the iGPU first, the Coral as second choice
     m = ha_options.model_config("auto", {})
-    assert m["coral_path"] == "/opt/m/coral.tflite" and m["path"].endswith(".xml")
+    assert m["coral_path"] == "/opt/m/coral.tflite" and m["path"].endswith("yolo11s_640.xml")
     m = ha_options.model_config("coral", {})
-    assert m["coral_path"] == "/opt/m/coral.tflite" and m["path"].endswith(".onnx")
+    assert m["coral_path"] == "/opt/m/coral.tflite" and m["path"].endswith(".onnx") and "zoom_path" not in m
     m = ha_options.model_config("cpu", m)
-    assert m["coral_path"] == "" and m["path"].endswith(".onnx") and "fallback_path" not in m
+    assert m["coral_path"] == "" and m["path"].endswith(".onnx") and m["input_size"] == 320
+    assert "fallback_path" not in m and "gpu_only" not in m
     with pytest.raises(ValueError):
         ha_options.model_config("tpu", {})
     assert ha_options.config_to_options({}, {"detector": "gpu"})["detector"] == "gpu"

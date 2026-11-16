@@ -9,11 +9,13 @@ machine). What is different:
 - **Recordings** are in `/media/uitkijk`, so you also see them in the HA media browser. They are not
   part of the app backup (they can be large); settings, faces and plates in `/data` are.
 - **Detection on the Coral, the Intel iGPU or the CPU** (Configuration tab → *Detection on*):
-  - `coral`: Google Coral USB with Google's SSDLite MobileDet (fast, a little less accurate than
-    YOLO). Plug it in before starting the app; the log says `... via TFLite on Edge TPU`.
-  - `gpu`: YOLO11n via OpenVINO on the Intel iGPU; the log says `... via OpenVINO on GPU`.
-  - `cpu`: YOLO11n via ONNX Runtime.
-  - `auto` (default): the Coral when it works, otherwise the iGPU, otherwise the CPU.
+  - `gpu`: YOLO11s via OpenVINO on the Intel iGPU, the whole frame at 640 px and the crop around
+    motion at 320 px (the combination that found the most for the least compute on lexi1986.s
+    clips); the log says `... via OpenVINO on GPU`.
+  - `coral`: Google Coral USB with Google.s SSDLite MobileDet (frugal, but clearly less accurate
+    than YOLO). Plug it in before starting the app; the log says `... via TFLite on Edge TPU`.
+  - `cpu`: the light YOLO11n via ONNX Runtime at 320 px.
+  - `auto` (default): the iGPU when it works, otherwise the Coral, otherwise the CPU.
   Whatever does not work falls back to the CPU. The pill **CPU … · TPU/GPU …** at the top of the
   Uitkijk page shows the load; hover over it for images per second and milliseconds per image.
 - **go2rtc** for the live view runs inside the app.

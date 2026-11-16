@@ -153,29 +153,39 @@ class Service:
             log.info("Object detection is off for all cameras; no model loaded")
             return None
         from .detector import ObjectDetector
-        size = int(self.cfg.model["input_size"])
-        coral = self.cfg.model.get("coral_path")
+        m = self.cfg.model
+        size = int(m["input_size"])
+        path = Path(m["path"])
+        fallback = Path(m["fallback_path"]) if m.get("fallback_path") else None
+        # the HA app's 'gpu'/'auto': the big model only on the iGPU; on the CPU it would be too heavy
+        if m.get("gpu_only") and path.exists():
+            try:
+                det = ObjectDetector(path, "GPU", size)
+                if det.device == "GPU":
+                    return det
+                log.warning("No usable iGPU for %s; trying the Coral or the CPU model", path.name)
+            except Exception as exc:  # noqa: BLE001
+                log.warning("Object model %s not usable on the iGPU (%s)", path.name, exc)
+            path = fallback or path
+        coral = m.get("coral_path")
         if coral and Path(coral).exists():
             try:
-                return ObjectDetector(coral, self.cfg.model["device"], size)
+                return ObjectDetector(coral, m["device"], size)
             except Exception as exc:  # noqa: BLE001
-                log.warning("Coral not usable (%s); falling back to %s", exc, self.cfg.model["path"])
+                log.warning("Coral not usable (%s); falling back to %s", exc, path)
         elif coral:
             log.warning("Coral model %s not found; see the guide 'Google Coral'", coral)
-        path = Path(self.cfg.model["path"])
-        fallback = self.cfg.model.get("fallback_path")
-        if not path.exists() and fallback and Path(fallback).exists():
+        if not path.exists() and fallback and fallback.exists():
             log.warning("Object model %s not found; using %s", path, fallback)
-            path = Path(fallback)
+            path = fallback
         if not path.exists():
             log.error("Model %s not found; object detection off, motion detection only. "
                       "See the guide: 'Exporting the model'.", path)
             return None
         try:
-            return ObjectDetector(path, self.cfg.model["device"], size)
+            return ObjectDetector(path, m["device"], size)
         except Exception as exc:  # noqa: BLE001
-            fallback = self.cfg.model.get("fallback_path")
-            if fallback and Path(fallback).exists() and Path(fallback) != path:
+            if fallback and fallback.exists() and fallback != path:
                 # e.g. the iGPU model (OpenVINO) does not work here: the ONNX model on the CPU
                 log.warning("Object model %s not usable (%s); falling back to %s", path.name, exc, fallback)
                 try:
@@ -190,7 +200,9 @@ class Service:
         zoomed in, YOLO11s at 320 px finds as much as at 640; on the whole frame 640 finds clearly
         more distant people."""
         zoom = self.cfg.model.get("zoom_path")
-        if not zoom or self.detector is None or getattr(self.detector, "device", None) == "Edge TPU":
+        # not with the Coral; in the HA app also not next to the light CPU fallback
+        if (not zoom or self.detector is None or getattr(self.detector, "device", None) == "Edge TPU"
+                or (self.cfg.model.get("gpu_only") and getattr(self.detector, "backend", None) != "OpenVINO")):
             return None
         try:
             from .detector import ObjectDetector

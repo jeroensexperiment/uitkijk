@@ -103,25 +103,33 @@ def options_to_config(opts: dict, existing: dict, mqtt: dict | None, public_url:
 DETECTORS = ("auto", "coral", "gpu", "cpu")
 
 
+GPU_MODEL, GPU_SIZE = "yolo11s_640.xml", 640      # whole frame on the iGPU: sharp at a distance
+ZOOM_MODEL, ZOOM_SIZE = "yolo11s.xml", 320         # the crop around motion (most frames)
+
+
 def model_config(detector: str, existing: dict) -> dict:
-    """The object model for the 'detector' choice in the tab. All of them fall back to the CPU
-    (YOLO11n, ONNX) when the Coral or the iGPU does not work.
-    - coral: Google Coral (SSDLite MobileDet: fast, a little less accurate than YOLO)
-    - gpu:   YOLO11n via OpenVINO on the Intel iGPU
-    - cpu:   YOLO11n via ONNX Runtime
-    - auto:  the Coral when it works, otherwise the iGPU, otherwise the CPU"""
+    """The object model for the 'detector' choice in the tab. Each falls back to YOLO11n on the
+    CPU (ONNX) when the iGPU or the Coral does not work.
+    - gpu:   YOLO11s on the Intel iGPU (OpenVINO): whole frame at 640 px, the crop around motion
+             at 320 px (what worked best on lexi1986's clips)
+    - coral: Google Coral (SSDLite MobileDet: fast, but clearly less accurate than YOLO)
+    - cpu:   YOLO11n via ONNX Runtime at 320 px (light)
+    - auto:  the iGPU when it works, otherwise the Coral, otherwise the CPU"""
     if detector not in DETECTORS:
         raise ValueError(f"Unknown detector '{detector}' (choose {', '.join(DETECTORS)})")
     onnx = os.environ.get("CAMSVC_MODEL", "/data/models/yolo11n.onnx")
-    xml = str(Path(onnx).with_suffix(".xml"))
-    gpu_ok = (Path(os.environ.get("CAMSVC_BUNDLED_MODELS", "/opt/camsvc-models")) / "yolo11n.xml").exists()
-    model = {**existing, "input_size": int(existing.get("input_size") or 320)}
+    models = Path(onnx).parent
+    gpu_ok = (Path(os.environ.get("CAMSVC_BUNDLED_MODELS", "/opt/camsvc-models")) / GPU_MODEL).exists()
+    model = {k: v for k, v in existing.items()
+             if k not in ("path", "device", "input_size", "zoom_path", "zoom_input_size",
+                          "fallback_path", "coral_path", "gpu_only")}
     model["coral_path"] = os.environ.get("CAMSVC_CORAL_MODEL", "") if detector in ("auto", "coral") else ""
     if detector in ("auto", "gpu") and gpu_ok:
-        model.update(path=xml, device="GPU" if detector == "gpu" else "AUTO", fallback_path=onnx)
+        model.update(path=str(models / GPU_MODEL), input_size=GPU_SIZE, device="GPU",
+                     zoom_path=str(models / ZOOM_MODEL), zoom_input_size=ZOOM_SIZE,
+                     fallback_path=onnx, gpu_only=True)
     else:
-        model.update(path=onnx, device="CPU")
-        model.pop("fallback_path", None)
+        model.update(path=onnx, input_size=320, device="CPU")
     return model
 
 

@@ -23,7 +23,8 @@ configuration:
   detector:
     name: Detection on
     description: >-
-      Where the object model runs. auto = the Coral when it works, otherwise the Intel iGPU,
-      otherwise the CPU. coral = Google Coral (fast, a little less accurate than YOLO). gpu =
-      YOLO11n on the Intel iGPU (OpenVINO). cpu = YOLO11n on the processor. When the choice does
-      not work it falls back to the CPU; the usage is shown at the top of the Uitkijk page.
+      Where the object model runs. auto (recommended) = the Intel iGPU when it works, otherwise the
+      Coral, otherwise the CPU. gpu = YOLO11s on the Intel iGPU: the whole frame at 640 px (sees
+      people far away), the crop around motion at 320 px. coral = Google Coral (frugal, but clearly
+      less accurate). cpu = the light YOLO11n on the processor. When the choice does not work it
+      falls back to the CPU; the usage is shown at the top of the Uitkijk page.

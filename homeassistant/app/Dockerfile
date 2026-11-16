@@ -23,7 +23,8 @@ ARG MODELS_URL=https://github.com/jeroensexperiment/uitkijk/releases/download/mo
 ARG CORAL_MODEL_URL=https://github.com/google-coral/test_data/raw/master/ssdlite_mobiledet_coco_qat_postprocess_edgetpu.tflite
 RUN apt-get update -qq && apt-get install -y -qq --no-install-recommends curl ca-certificates \
  && mkdir -p /out \
- && for f in yolo11n.onnx yolo11n.xml yolo11n.bin; do curl -fsSL -o "/out/$f" "$MODELS_URL/$f" || exit 1; done \
+ && for f in yolo11n.onnx yolo11n.xml yolo11n.bin yolo11s_640.xml yolo11s_640.bin yolo11s.xml yolo11s.bin; do \
+      curl -fsSL -o "/out/$f" "$MODELS_URL/$f" || exit 1; done \
  && curl -fsSL -o /out/ssdlite_mobiledet_edgetpu.tflite "$CORAL_MODEL_URL"
 
 # --- the app -------------------------------------------------------------------------------------

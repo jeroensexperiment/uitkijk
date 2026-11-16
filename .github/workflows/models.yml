@@ -1,6 +1,7 @@
 # Builds the YOLO11n object models once and publishes them as the release "models":
 #   yolo11n.onnx               (ONNX Runtime, CPU)
 #   yolo11n.xml + yolo11n.bin  (OpenVINO, Intel iGPU; same OpenVINO version as requirements.txt)
+#   yolo11s_640.xml/.bin, yolo11s.xml/.bin (OpenVINO, iGPU: whole frame at 640 px, crops at 320 px)
 #   export.log                 (the full conversion output, also when it fails)
 # The Home Assistant app downloads them from there instead of converting during installation.
 # The Coral uses Google's ready-made SSDLite MobileDet model: a YOLO model for the Edge TPU needs
@@ -32,6 +33,13 @@ jobs:
             cp yolo11n.onnx ../out/
             yolo export model=yolo11n.pt format=openvino imgsz=320 half=False
             cp yolo11n_openvino_model/yolo11n.xml yolo11n_openvino_model/yolo11n.bin ../out/
+            # YOLO11s for the iGPU (lexi1986: 640 px on the whole frame, 320 px on the crop around motion)
+            yolo export model=yolo11s.pt format=openvino imgsz=640 half=False
+            cp yolo11s_openvino_model/yolo11s.xml ../out/yolo11s_640.xml
+            cp yolo11s_openvino_model/yolo11s.bin ../out/yolo11s_640.bin
+            rm -rf yolo11s_openvino_model
+            yolo export model=yolo11s.pt format=openvino imgsz=320 half=False
+            cp yolo11s_openvino_model/yolo11s.xml yolo11s_openvino_model/yolo11s.bin ../out/
           } 2>&1 | tee ../out/export.log
       - name: Publish
         if: always()

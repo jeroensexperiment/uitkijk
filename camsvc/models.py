@@ -87,9 +87,7 @@ def ensure_models(cfg: "Config") -> None:
     """Prepare the object model. Log errors, never block startup: without it only motion detection
     runs. Face models are fetched in the background by the service (fetch_face_models), so a slow
     download of ~300 MB does not keep the web page away."""
-    paths = [Path(cfg.model["path"])]
-    if cfg.model.get("fallback_path"):
-        paths.append(Path(cfg.model["fallback_path"]))
+    paths = [Path(cfg.model[k]) for k in ("path", "zoom_path", "fallback_path") if cfg.model.get(k)]
     for model in paths:
         # OpenVINO: the .xml needs its .bin next to it
         files = [model, model.with_suffix(".bin")] if model.suffix == ".xml" else [model]
