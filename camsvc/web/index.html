@@ -168,6 +168,21 @@
     dialog:has(#pFaces:not(:empty)):has(#pPlates:not(:empty)) video { max-height: calc(100dvh - 400px); }
     dialog:has(#pAi:not(:empty)) video { max-height: calc(100dvh - 330px); }
     .pv-wrap { position: relative; }
+    /* timeline beside the player: recordings as bars on a time axis, newest at the top */
+    .player-layout { display: flex; min-height: 0; }
+    .player-main { flex: 1; min-width: 0; }
+    .rail { width: 8.5rem; flex-shrink: 0; display: flex; flex-direction: column; border-left: 1px solid var(--me-border); background: var(--me-bg); }
+    .rail-scroll { flex: 1; overflow-y: auto; max-height: calc(100dvh - 90px); scrollbar-width: thin; }
+    .rail-inner { position: relative; }
+    .rail-tick { position: absolute; left: 0; right: 0; border-top: 1px solid var(--me-border); font-size: .66rem; color: var(--me-text-muted); padding: 1px 0 0 .35rem; font-variant-numeric: tabular-nums; pointer-events: none; }
+    .rail-tick.day { border-top-color: var(--me-border-strong); color: var(--me-text); font-weight: 600; }
+    .rail-ev { position: absolute; left: 2.9rem; right: .45rem; min-height: 4px; border: 0; border-radius: 3px; padding: 0; cursor: pointer; opacity: .75; }
+    .rail-ev:hover { opacity: 1; }
+    .rail-ev.minor { opacity: .35; }
+    .rail-ev.cur { opacity: 1; outline: 2px solid var(--me-text); outline-offset: 1px; z-index: 1; }
+    .rail-zoom { display: flex; justify-content: center; gap: .4rem; padding: .45rem; border-top: 1px solid var(--me-border); }
+    .rail-zoom .icon-btn { font-size: 1.1rem; }
+    @media (max-width: 760px) { .rail { display: none; } }
     img[data-zoom] { cursor: zoom-in; }
     .zoom-body { display: grid; justify-items: center; gap: .8rem; padding: 1rem; }
     .zoom-face { width: min(16rem, 70vw); aspect-ratio: 1; object-fit: cover; border-radius: var(--me-radius-card); border: 1px solid var(--me-border-strong); background: var(--me-bg); }
@@ -362,6 +377,7 @@
   </div>
 
   <dialog id="player" aria-labelledby="pTitle">
+    <div class="player-layout"><div class="player-main">
     <div class="player-head">
       <div>
         <h3 id="pTitle"></h3>
@@ -392,6 +408,15 @@
       <a class="btn" id="pDownload" download>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11m0 0l-4-4m4 4l4-4M5 20h14"/></svg>Download
       </a>
+    </div>
+    </div>
+    <aside class="rail" aria-label="Timeline: earlier recordings">
+      <div class="rail-scroll" id="railScroll"><div class="rail-inner" id="railInner"></div></div>
+      <div class="rail-zoom">
+        <button class="icon-btn" id="railOut" title="Zoom out (more hours)" aria-label="Zoom out">−</button>
+        <button class="icon-btn" id="railIn" title="Zoom in (more detail)" aria-label="Zoom in">+</button>
+      </div>
+    </aside>
     </div>
   </dialog>
 
@@ -834,6 +859,7 @@
       renderPlates(e);
       renderAi(e);
       loadBoxes(e);
+      showRail();
       $("pPrev").disabled = i <= 0;
       $("pNext").disabled = i >= state.items.length - 1 && state.items.length >= state.total;
       if (!$("player").open) $("player").showModal();
@@ -843,6 +869,83 @@
       if (i >= state.items.length && state.items.length < state.total) await loadEvents(false);
       openEvent(i);
     }
+    // ---------- timeline beside the player ----------
+    // The recordings with the same filter as the list, as bars on a time axis (newest at the top),
+    // so you can scroll back and click an earlier one, like the review timeline in Frigate.
+    const rail = { items: [], key: "", loaded: 0, pxPerHour: 120 };
+    try { rail.pxPerHour = Number(localStorage.getItem("camsvc-rail-zoom")) || 120; } catch {}
+    const evEnd = (e) => e.end ? new Date(e.end).getTime() : new Date(e.start).getTime() + (e.duration || 0) * 1000;
+    async function loadRail() {
+      const key = query(0, 200);
+      if (key === rail.key && Date.now() - rail.loaded < 30000) return;
+      try {
+        rail.items = (await api(key)).items;
+        rail.key = key; rail.loaded = Date.now();
+      } catch { rail.items = []; }
+    }
+    function renderRail() {
+      const inner = $("railInner");
+      if (!rail.items.length) { inner.innerHTML = ""; inner.style.height = "0"; return; }
+      const H = 3600e3, px = rail.pxPerHour;
+      const top = Math.max(Date.now(), ...rail.items.map(evEnd));
+      const oldest = Math.min(...rail.items.map((e) => new Date(e.start).getTime()));
+      const y = (t) => (top - t) / H * px;
+      inner.style.height = `${Math.ceil(y(oldest) + 40)}px`;
+      const step = (px >= 360 ? 0.25 : px >= 180 ? 0.5 : px >= 60 ? 1 : px >= 30 ? 2 : 4) * H;
+      let html = "";
+      // ticks on the local clock (so midnight gets the day label at every zoom level)
+      const first = new Date(top), stepMin = step / 60000;
+      first.setHours(0, Math.floor((first.getHours() * 60 + first.getMinutes()) / stepMin) * stepMin, 0, 0);
+      for (let t = first.getTime(); t > oldest - step; t -= step) {
+        const d = new Date(t);
+        const midnight = d.getHours() === 0 && d.getMinutes() === 0;
+        html += `<div class="rail-tick${midnight ? " day" : ""}" style="top:${y(t).toFixed(1)}px">${midnight ? esc(dayLabel(d)) : fmtTime(d.toISOString())}</div>`;
+      }
+      const cur = state.items[state.current];
+      rail.items.forEach((e, k) => {
+        const t0 = new Date(e.start).getTime(), t1 = evEnd(e);
+        const l = LABELS[e.label] || LABELS.motion;
+        const names = [knownNames(e), ...(e.plates || []).map((p) => state.plates.known[p.plate] || p.plate)].filter(Boolean).join(", ");
+        const tip = `${fmtTime(e.start)} · ${l.name} · ${camName(e.camera)}${names ? ` · ${names}` : ""}`;
+        html += `<button class="rail-ev${e.label === "motion" || e.false_alarm ? " minor" : ""}${cur && cur.clip === e.clip ? " cur" : ""}" data-rail="${k}"
+          style="top:${y(t1).toFixed(1)}px;height:${Math.max(4, y(t0) - y(t1)).toFixed(1)}px;background:${l.color}" title="${esc(tip)}" aria-label="${esc(tip)}"></button>`;
+      });
+      inner.innerHTML = html;
+    }
+    function railToCurrent() {
+      const b = $("railInner").querySelector(".rail-ev.cur");
+      if (b) { const s = $("railScroll"); s.scrollTop = b.offsetTop - s.clientHeight / 2; }
+    }
+    async function showRail() {
+      await loadRail();
+      renderRail();
+      railToCurrent();
+    }
+    async function openRailEvent(k) {
+      const e = rail.items[k];
+      if (!e) return;
+      // the list uses the same filter and order: load pages until the recording is in it
+      let i = state.items.findIndex((x) => x.clip === e.clip);
+      while (i < 0 && state.items.length < state.total) {
+        await loadEvents(false);
+        i = state.items.findIndex((x) => x.clip === e.clip);
+      }
+      if (i >= 0) openEvent(i);
+    }
+    function zoomRail(factor) {
+      const s = $("railScroll");
+      const centre = (s.scrollTop + s.clientHeight / 2) / rail.pxPerHour;   // hours from the top
+      rail.pxPerHour = Math.min(960, Math.max(15, rail.pxPerHour * factor));
+      try { localStorage.setItem("camsvc-rail-zoom", String(rail.pxPerHour)); } catch {}
+      renderRail();
+      s.scrollTop = centre * rail.pxPerHour - s.clientHeight / 2;
+    }
+    $("railIn").addEventListener("click", () => zoomRail(2));
+    $("railOut").addEventListener("click", () => zoomRail(0.5));
+    $("railInner").addEventListener("click", (ev) => {
+      const b = ev.target.closest("[data-rail]");
+      if (b) openRailEvent(Number(b.dataset.rail));
+    });
     // ---------- detection boxes while playing a clip ----------
     // <clip>.boxes holds per analysed frame [seconds from clip start, [[kind, label, score, x1, y1, x2, y2], ...]]
     // with the box as fractions of the frame. Shown over the video; the choice is kept per browser.
