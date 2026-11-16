@@ -193,3 +193,17 @@ def test_forget_like_removes_only_near_duplicates(tmp_path):
     assert r.forget_like("Sam", jpg((200, 40, 40))) == 1
     assert not (tmp_path / "Sam" / "auto").exists()
     assert (tmp_path / "Sam" / "bbbbbbbbbbbb.jpg").exists() and (tmp_path / "Noor" / "cccccccccccc.jpg").exists()
+
+
+def test_face_view_is_a_larger_crop_around_the_face():
+    import cv2
+    import numpy as np
+
+    from camsvc.faces import face_view
+    img = np.zeros((1080, 1920, 3), np.uint8)
+    face = np.array([900, 400, 60, 70] + [0] * 11, np.float32)      # x, y, w, h of the face
+    view = cv2.imdecode(np.frombuffer(face_view(img, face), np.uint8), cv2.IMREAD_COLOR)
+    assert view.shape[:2] == (140, 140)                               # twice the face, not scaled up
+    big = np.array([0, 0, 600, 600] + [0] * 11, np.float32)
+    view = cv2.imdecode(np.frombuffer(face_view(img, big), np.uint8), cv2.IMREAD_COLOR)
+    assert max(view.shape[:2]) == 480                                 # at most VIEW_SIDE

@@ -6,7 +6,7 @@ blueprint:
     alarm. The name of the person entity must match the name under Faces.
   domain: automation
   author: Uitkijk
-  source_url: https://github.com/lexi1986/uitkijk/blob/main/homeassistant/blueprints/automation/uitkijk/presence.yaml
+  source_url: https://github.com/jeroensexperiment/uitkijk/blob/main/homeassistant/blueprints/automation/uitkijk/presence.yaml
   homeassistant:
     min_version: "2024.10.0"
   input:

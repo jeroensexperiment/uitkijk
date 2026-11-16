@@ -4,6 +4,7 @@ __pycache__/
 models/
 .pytest_cache/
 config.yaml
+!homeassistant/app/config.yaml
 data/
 clips/
 .env

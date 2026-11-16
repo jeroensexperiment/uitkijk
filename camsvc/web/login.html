@@ -4,8 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#090e18">
-  <link rel="manifest" href="/manifest.json">
-  <link rel="apple-touch-icon" href="/icon-180.png">
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="icon-180.png">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="Uitkijk">
@@ -106,19 +106,19 @@
 
     async function register() {
       const code = $("code").value.trim();
-      const { challenge_id, options: o } = await post("/api/auth/register/options", { code });
+      const { challenge_id, options: o } = await post("api/auth/register/options", { code });
       o.challenge = unb64(o.challenge);
       o.user.id = unb64(o.user.id);
       o.excludeCredentials = (o.excludeCredentials || []).map((c) => ({ ...c, id: unb64(c.id) }));
       const cred = await navigator.credentials.create({ publicKey: o });
-      await post("/api/auth/register", { challenge_id, credential: credJSON(cred), name: $("name").value.trim() || "Device", code });
+      await post("api/auth/register", { challenge_id, credential: credJSON(cred), name: $("name").value.trim() || "Device", code });
     }
     async function login() {
-      const { challenge_id, options: o } = await post("/api/auth/login/options");
+      const { challenge_id, options: o } = await post("api/auth/login/options");
       o.challenge = unb64(o.challenge);
       o.allowCredentials = (o.allowCredentials || []).map((c) => ({ ...c, id: unb64(c.id) }));
       const cred = await navigator.credentials.get({ publicKey: o });
-      await post("/api/auth/login", { challenge_id, credential: credJSON(cred) });
+      await post("api/auth/login", { challenge_id, credential: credJSON(cred) });
     }
 
     $("go").addEventListener("click", async () => {
@@ -134,7 +134,7 @@
 
     (async () => {
       if (!window.PublicKeyCredential) { fail("This browser or connection does not support passkeys. Open the page via https://."); $("go").disabled = true; return; }
-      const s = await fetch("/api/auth/state", { cache: "no-store" }).then((r) => r.json()).catch(() => ({}));
+      const s = await fetch("api/auth/state", { cache: "no-store" }).then((r) => r.json()).catch(() => ({}));
       if (s.logged_in) { location.replace(nextUrl()); return; }
       setup = !!s.setup;
       if (setup) {

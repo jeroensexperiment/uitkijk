@@ -16,7 +16,7 @@ from datetime import datetime
 from fastapi import Body, FastAPI, HTTPException, Request, WebSocket
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 
-from . import __version__
+from . import __version__, supervisor
 from .config import EDITABLE, validate_settings
 from .motion import draw_mask_overlay, validate_mask, validate_zones
 from .summary import compare_ai, parse_day, summarize_day
@@ -42,7 +42,7 @@ if TYPE_CHECKING:
 PUBLIC_PATHS = ("/login", "/manifest.json", "/icon-180.png", "/icon-512.png")
 
 
-def create_app(svc: "Service") -> FastAPI:
+def create_app(svc: "Service", config_path: Path | None = None) -> FastAPI:
     app = FastAPI(title="camera-service", version=__version__, docs_url="/docs", redoc_url=None)
     clips_root = svc.cfg.clips_dir.resolve()
 
@@ -60,8 +60,8 @@ def create_app(svc: "Service") -> FastAPI:
         return client_host in ("127.0.0.1", "::1") and "x-forwarded-for" not in headers
 
     def logged_in(request: Request) -> bool:
-        return (svc.auth is None or direct_local(request.client.host if request.client else None,
-                                                 request.headers)
+        host = request.client.host if request.client else None
+        return (svc.auth is None or direct_local(host, request.headers) or supervisor.via_ingress(host)
                 or svc.auth.session_ok(request.cookies.get(COOKIE)))
 
     @app.middleware("http")
@@ -158,10 +158,10 @@ def create_app(svc: "Service") -> FastAPI:
     def manifest():
         """For 'Add to Home Screen': own icon, dark background, no browser bar."""
         return JSONResponse({
-            "name": "Uitkijk", "short_name": "Uitkijk", "start_url": "/", "display": "standalone",
+            "name": "Uitkijk", "short_name": "Uitkijk", "start_url": "./", "display": "standalone",
             "background_color": "#090e18", "theme_color": "#090e18", "lang": "en",
-            "icons": [{"src": "/icon-180.png", "sizes": "180x180", "type": "image/png"},
-                      {"src": "/icon-512.png", "sizes": "512x512", "type": "image/png"}]})
+            "icons": [{"src": "icon-180.png", "sizes": "180x180", "type": "image/png"},
+                      {"src": "icon-512.png", "sizes": "512x512", "type": "image/png"}]})
 
     @app.get("/icon-{size}.png", include_in_schema=False)
     def icon(size: int):
@@ -181,7 +181,7 @@ def create_app(svc: "Service") -> FastAPI:
                  "motion": c.motion_active, "event_active": c.event is not None,
                  "detect": c.detect_enabled, "record": c.record_enabled,
                  "loitering": c.loitering, "face": c.face_name if c.faces else None,
-                 "live": f"/live/stream.html?src={urllib.parse.quote(c.cfg.live_stream)}"
+                 "live": f"live/stream.html?src={urllib.parse.quote(c.cfg.live_stream)}"
                          f"&mode={urllib.parse.quote(c.cfg.live_mode, safe=',')}"
                  if svc.cfg.go2rtc_url and c.cfg.live_stream else None}
                 for c in svc.cameras.values()]
@@ -487,6 +487,7 @@ def create_app(svc: "Service") -> FastAPI:
         src = ws.query_params.get("src", "")
         if svc.auth is not None and not (
                 direct_local(ws.client.host if ws.client else None, ws.headers)
+                or supervisor.via_ingress(ws.client.host if ws.client else None)
                 or svc.auth.session_ok(ws.cookies.get(COOKIE))):
             await ws.close(code=1008)
             return
@@ -535,6 +536,7 @@ def create_app(svc: "Service") -> FastAPI:
                         "max_gb": svc.cfg.retention_max_gb, "retention_days": svc.cfg.retention_days,
                         "archive": svc.archive_status()},
             "detector": getattr(svc.detector, "device", None),
+            "usage": svc.usage.sample(svc.detector) if getattr(svc, "usage", None) else None,
             "ai": svc.ai.status() if svc.ai else {"state": "off"},
             "health": svc.health_snapshot(),
             "cameras": [c.status() for c in svc.cameras.values()],
@@ -579,7 +581,11 @@ def create_app(svc: "Service") -> FastAPI:
         get_cam(name)
         try:
             values = validate_settings(payload)
-            return {"values": svc.set_settings(name, values)}
+            res = {"values": svc.set_settings(name, values)}
+            if svc.faces_downloading:
+                res["note"] = ("Face models (~300 MB) are being downloaded; face recognition starts by "
+                               "itself in a few minutes.")
+            return res
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
 
@@ -627,10 +633,66 @@ def create_app(svc: "Service") -> FastAPI:
     @app.get("/clips/{path:path}")
     def clip(path: str):
         target = clip_file(path)
-        if target.suffix not in (".mp4", ".jpg", ".json"):
+        if target.suffix not in (".mp4", ".jpg", ".json", ".boxes"):
             raise HTTPException(404, "Not found")
-        media = {".mp4": "video/mp4", ".jpg": "image/jpeg", ".json": "application/json"}[target.suffix]
+        media = {".mp4": "video/mp4", ".jpg": "image/jpeg", ".json": "application/json",
+                 ".boxes": "application/json"}[target.suffix]
         return FileResponse(target, media_type=media)
+
+    # --- configuration file (editor on the web page) ------------------------
+    def config_editable(request: Request) -> None:
+        """The file holds camera and MQTT passwords: only via the HA sidebar, from the server itself
+        or after logging in with a passkey, never just from the home network."""
+        host = request.client.host if request.client else None
+        if config_path is None:
+            raise HTTPException(404, "Not available")
+        if not (supervisor.via_ingress(host) or direct_local(host, request.headers)
+                or (svc.auth is not None and svc.auth.session_ok(request.cookies.get(COOKIE)))):
+            raise HTTPException(403, "The configuration can only be edited via the Home Assistant sidebar "
+                                     "or after logging in with a passkey")
+
+    @app.get("/api/config")
+    def get_config(request: Request):
+        config_editable(request)
+        return {"yaml": config_path.read_text(encoding="utf-8"), "path": str(config_path)}
+
+    @app.put("/api/config")
+    def put_config(request: Request, payload: dict = Body(...)):
+        """Check the new file by loading it as the service would; save and restart only when it loads."""
+        import os
+        import signal
+        import threading
+
+        import yaml
+
+        from .config import load_config
+        config_editable(request)
+        text = payload.get("yaml")
+        if not isinstance(text, str) or not text.strip():
+            raise HTTPException(400, "Empty configuration")
+        tmp = config_path.with_suffix(".yaml.new")
+        tmp.write_text(text, encoding="utf-8")
+        tmp.chmod(0o600)
+        try:
+            new = yaml.safe_load(text)
+            if not isinstance(new, dict):
+                raise ValueError("The file must contain settings (key: value)")
+            load_config(tmp)
+            # HA app: the Configuration tab first, otherwise the next start would bring back the
+            # cameras from the old tab
+            from .ha_options import save_to_tab
+            save_to_tab(new)
+        except (ValueError, KeyError, TypeError, RuntimeError, yaml.YAMLError) as exc:
+            tmp.unlink(missing_ok=True)
+            raise HTTPException(400, f"Not saved: {exc}") from exc
+        config_path.replace(config_path.with_suffix(".yaml.previous"))
+        tmp.replace(config_path)
+        log.warning("Configuration changed from the web page; restarting")
+        # stop neatly (recordings closed); __main__ exits with code 3 so Docker, systemd or the
+        # HA app starts the service again
+        svc.restart_requested = True
+        threading.Timer(1.0, os.kill, (os.getpid(), signal.SIGTERM)).start()
+        return {"ok": True}
 
     return app
 

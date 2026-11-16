@@ -7,7 +7,7 @@ blueprint:
     Android apps of Home Assistant (long-press the notification).
   domain: automation
   author: Uitkijk
-  source_url: https://github.com/lexi1986/uitkijk/blob/main/homeassistant/blueprints/automation/uitkijk/who_is_this.yaml
+  source_url: https://github.com/jeroensexperiment/uitkijk/blob/main/homeassistant/blueprints/automation/uitkijk/who_is_this.yaml
   homeassistant:
     min_version: "2024.10.0"
   input:

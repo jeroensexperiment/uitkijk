@@ -11,6 +11,7 @@ import logging
 import subprocess
 import sys
 import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -22,6 +23,12 @@ from .config import LABEL_CLASSES
 log = logging.getLogger(__name__)
 
 CLASS_TO_LABEL = {cls: label for label, classes in LABEL_CLASSES.items() for cls in classes}
+# Google's SSD models number the classes with the gaps of the original COCO list (90 ids);
+# YOLO uses the 80 classes without gaps. Only the classes Uitkijk uses.
+SSD_TO_COCO80 = {0: 0, 1: 1, 2: 2, 3: 3, 5: 5, 7: 7, 15: 14, 16: 15, 17: 16}
+# names of the COCO-80 classes Uitkijk uses (shown on the boxes when playing a clip back)
+COCO_NAMES = {0: "person", 1: "bicycle", 2: "car", 3: "motorcycle", 5: "bus", 7: "truck",
+              14: "bird", 15: "cat", 16: "dog"}
 
 
 @dataclass(slots=True)
@@ -29,6 +36,7 @@ class Detection:
     label: str
     score: float
     box: tuple[int, int, int, int]   # x1, y1, x2, y2 in pixels of the input frame
+    kind: str = ""                   # the COCO class, e.g. car, bicycle, dog (label groups them)
 
 
 _OV_PROBE = r"""
@@ -72,6 +80,8 @@ class ObjectDetector:
         self.input_size = int(input_size)
         self._lock = threading.Lock()
         self.accelerated = False   # True = the model does not run on the CPU
+        self.busy_seconds = 0.0    # time spent running the model (for the usage meter)
+        self.runs = 0
         path = Path(model_path)
         if path.suffix == ".onnx":
             self._load_onnx(path)
@@ -107,7 +117,13 @@ class ObjectDetector:
         interp = Interpreter(model_path=str(path), experimental_delegates=[delegate])
         interp.allocate_tensors()
         inp = interp.get_input_details()[0]
-        out = interp.get_output_details()[0]
+        outs = interp.get_output_details()
+        self.backend, self.device = "TFLite", "Edge TPU"
+        self.accelerated = True
+        if len(outs) == 4:
+            self._setup_ssd(interp, inp, outs)
+            return
+        out = outs[0]
         self.input_size = size = int(inp["shape"][1])   # NHWC
         in_scale, in_zero = inp["quantization"]
         out_scale, out_zero = out["quantization"]
@@ -128,9 +144,27 @@ class ObjectDetector:
             y[:, :4] *= size     # TFLite exports return normalised boxes (0-1)
             return y
 
-        self.backend, self.device = "TFLite", "Edge TPU"
-        self.accelerated = True
         self._run = run
+
+    def _setup_ssd(self, interp, inp, outs) -> None:
+        """Google's ready-made Coral models (SSDLite MobileDet, SSD MobileNet; also used by
+        Frigate): uint8 RGB input and the detections already worked out by the model
+        (boxes, classes, scores, count)."""
+        self.input_size = size = int(inp["shape"][1])
+        # usual order: boxes [1,N,4], classes [1,N], scores [1,N], count [1]
+        boxes_i = next(o["index"] for o in outs if len(o["shape"]) == 3)
+        count_i = next(o["index"] for o in outs if int(np.prod(o["shape"])) == 1)
+        classes_i, scores_i = (o["index"] for o in outs if o["index"] not in (boxes_i, count_i))
+
+        def run_ssd(rgb: np.ndarray):
+            interp.set_tensor(inp["index"], rgb[np.newaxis].astype(np.uint8))
+            interp.invoke()
+            n = int(interp.get_tensor(count_i)[0])
+            return (interp.get_tensor(boxes_i)[0][:n], interp.get_tensor(classes_i)[0][:n].astype(int),
+                    interp.get_tensor(scores_i)[0][:n])
+
+        self._ssd = run_ssd
+        self._ssd_size = size
 
     def _load_openvino(self, path: Path, wanted: str) -> None:
         candidates = {"AUTO": ["GPU", "CPU"], "GPU": ["GPU", "CPU"]}.get(wanted, [wanted])
@@ -165,9 +199,14 @@ class ObjectDetector:
             return []
         wanted = {cls for lbl in labels for cls in LABEL_CLASSES[lbl]}
         img, scale, px, py = self._letterbox(bgr)
+        if getattr(self, "_ssd", None) is not None:
+            return self._detect_ssd(bgr, img, scale, px, py, wanted, min_score)
         blob = cv2.dnn.blobFromImage(img, 1 / 255.0, swapRB=True)  # NCHW, RGB, 0-1
         with self._lock:
+            t0 = time.perf_counter()
             pred = self._run(blob)[0]                # [4 + C, N]
+            self.busy_seconds += time.perf_counter() - t0
+            self.runs += 1
         pred = pred.T                                # [N, 4 + C]
         class_scores = pred[:, 4:]
         cls_ids = class_scores.argmax(axis=1)
@@ -188,7 +227,27 @@ class ObjectDetector:
         for i in np.array(idx).flatten():
             x, y, bw_, bh_ = rects[i]
             box = (max(int(x), 0), max(int(y), 0), min(int(x + bw_), w - 1), min(int(y + bh_), h - 1))
-            result.append(Detection(CLASS_TO_LABEL[int(cls_ids[i])], float(scores[i]), box))
+            cls = int(cls_ids[i])
+            result.append(Detection(CLASS_TO_LABEL[cls], float(scores[i]), box, COCO_NAMES.get(cls, "")))
+        return result
+
+    def _detect_ssd(self, bgr, img, scale, px, py, wanted, min_score) -> list[Detection]:
+        with self._lock:
+            t0 = time.perf_counter()
+            boxes, classes, scores = self._ssd(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
+            self.busy_seconds += time.perf_counter() - t0
+            self.runs += 1
+        h, w = bgr.shape[:2]
+        s = self._ssd_size
+        result = []
+        for (y1, x1, y2, x2), c, score in zip(boxes, classes, scores):
+            cls = SSD_TO_COCO80.get(int(c))
+            if cls is None or cls not in wanted or score < min_score:
+                continue
+            box = (max(int((x1 * s - px) / scale), 0), max(int((y1 * s - py) / scale), 0),
+                   min(int((x2 * s - px) / scale), w - 1), min(int((y2 * s - py) / scale), h - 1))
+            if box[2] > box[0] and box[3] > box[1]:
+                result.append(Detection(CLASS_TO_LABEL[cls], float(score), box, COCO_NAMES.get(cls, "")))
         return result
 
 

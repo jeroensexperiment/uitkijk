@@ -10,7 +10,8 @@ import time
 from .events import NIGHT_HOURS
 from .plates import PlateRead, vote
 from .camera_base import (
-    ActiveEvent, PLATE_PARKED_AFTER, STATIONARY_REFRESH, contained, iou, log,
+    ActiveEvent, PARKED_PLATE_TRIES, PLATE_PARKED_AFTER, STATIONARY_IOU, STATIONARY_REFRESH, Track, contained,
+    frac_box, iou, log,
 )
 
 
@@ -72,6 +73,7 @@ class PlatesMixin:
                 return
             sy, sx = frame.shape[0] / sub_shape[0], frame.shape[1] / sub_shape[1]
             reads: list[PlateRead] = []
+            marks = []                         # (time, "plate", plate, vehicle box) for playback
             for x1, y1, x2, y2 in boxes:
                 bw, bh = x2 - x1, y2 - y1
                 cx1 = int(max(0, (x1 - 0.1 * bw) * sx))
@@ -79,7 +81,9 @@ class PlatesMixin:
                 cy1 = int(max(0, (y1 - 0.1 * bh) * sy))
                 cy2 = int(min(frame.shape[0], (y2 + 0.1 * bh) * sy))
                 if cx2 - cx1 >= 60 and cy2 - cy1 >= 40:
-                    reads += self.plates.read(frame[cy1:cy2, cx1:cx2])
+                    found = self.plates.read(frame[cy1:cy2, cx1:cx2])
+                    reads += found
+                    marks += [(r, frac_box((x1, y1, x2, y2), sub_shape)) for r in found]
             for r in reads:   # fix a misread of a known plate, so the votes add up
                 r.plate = self.plates.known_plate(r.plate) or r.plate
             if not reads:
@@ -89,6 +93,7 @@ class PlatesMixin:
                 if ev is None:
                     return
                 ev.plates = (ev.plates + reads)[-12:]
+                ev.marks = (ev.marks + [(time.monotonic(), "plate", r.plate, b) for r, b in marks])[-200:]
                 best = vote(ev.plates)
             name = self.plates.name_of(best.plate)
             log.info("[%s] plate: %s%s (%.2f)", self.name, best.plate,
@@ -96,6 +101,68 @@ class PlatesMixin:
             self._set_plate(best.plate, name)
         except Exception:  # noqa: BLE001 - recognition must never disturb the camera
             log.exception("[%s] plate recognition failed", self.name)
+        finally:
+            self._plate_busy = False
+
+    def _maybe_parked_plates(self, now: float, sub_shape: tuple[int, int], parked: list) -> None:
+        """(lock already held) Plates of parked cars on their boxes in the clip, as Frigate shows
+        them. A known car on its learned spot gets its plate without reading; another parked car
+        is read once (a second try when that fails) and the plate is remembered with it. Only for
+        the boxes: these plates do not count as the event's vehicle and never trigger alerts."""
+        ev = self.event
+        if ev is None or self.plates is None or not self.cfg.settings["plates"]["enabled"]:
+            return
+        start = None
+        for d in parked:
+            if d.label != "vehicle" or d.kind == "bicycle":
+                continue
+            spot = next((p for p, b in self._spots.items() if iou(d.box, tuple(b)) >= 0.5), None)
+            track = max((t for t in self._tracks if t.label == "vehicle"),
+                        key=lambda t: iou(t.box, d.box), default=None)
+            if track is not None and iou(track.box, d.box) < STATIONARY_IOU:
+                track = None
+            plate = spot or (track.plate if track else None)
+            key = ("spot", spot) if spot else id(track)
+            if plate:
+                if key not in ev.plated_tracks:
+                    ev.plated_tracks.add(key)
+                    ev.marks.append((now, "plate", plate, frac_box(d.box, sub_shape)))
+            elif track is not None and track.plate_tries < PARKED_PLATE_TRIES and start is None:
+                start = (track, d.box)
+        if start is not None and not self._plate_busy:
+            track, box = start
+            track.plate_tries += 1
+            self._plate_busy = True
+            threading.Thread(target=self._parked_plate_job, args=(track, sub_shape, box),
+                             name=f"plates-{self.name}", daemon=True).start()
+
+    def _parked_plate_job(self, track: Track, sub_shape: tuple[int, int],
+                          box: tuple[int, int, int, int]) -> None:
+        try:
+            frame = self.recorder.grab_frame()
+            if frame is None:
+                return
+            sy, sx = frame.shape[0] / sub_shape[0], frame.shape[1] / sub_shape[1]
+            x1, y1, x2, y2 = box
+            bw, bh = x2 - x1, y2 - y1
+            cx1, cx2 = int(max(0, (x1 - 0.1 * bw) * sx)), int(min(frame.shape[1], (x2 + 0.1 * bw) * sx))
+            cy1, cy2 = int(max(0, (y1 - 0.1 * bh) * sy)), int(min(frame.shape[0], (y2 + 0.1 * bh) * sy))
+            if cx2 - cx1 < 60 or cy2 - cy1 < 40:
+                return
+            reads = self.plates.read(frame[cy1:cy2, cx1:cx2])
+            best = vote(reads) if reads else None
+            if best is None:
+                return
+            plate = self.plates.known_plate(best.plate) or best.plate
+            with self._lock:
+                track.plate = plate
+                ev = self.event
+                if ev is not None:
+                    ev.plated_tracks.add(id(track))
+                    ev.marks.append((time.monotonic(), "plate", plate, frac_box(box, sub_shape)))
+            log.info("[%s] plate of a parked car: %s (%.2f)", self.name, plate, best.confidence)
+        except Exception:  # noqa: BLE001 - recognition must never disturb the camera
+            log.exception("[%s] reading the plate of a parked car failed", self.name)
         finally:
             self._plate_busy = False
 

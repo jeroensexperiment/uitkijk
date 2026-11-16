@@ -60,8 +60,9 @@ class Service:
 
         self.store = EventStore(cfg.clips_dir, cfg.public_url)
         self._rescue_parts()
-        from .health import Health
+        from .health import Health, Usage
         self.health = Health(cfg.state_dir, cfg.clips_dir)
+        self.usage = Usage()
         if self.health.previous_crash:
             log.warning("Previous run did not stop cleanly (crash or out of memory?)")
         self.auth = None
@@ -70,6 +71,8 @@ class Service:
             self.auth = Auth(cfg.state_dir, cfg.auth["rp_id"], cfg.auth["origin"], cfg.auth["session_days"])
         self.detector = self._load_detector()
         self.zoom_detector = self._load_zoom_detector()
+        self._faces_lock = threading.Lock()
+        self.faces_downloading = False
         self.faces = self._load_faces()
         self.plates = self._load_plates()
         # without an MQTT server (no Home Assistant) everything works except the HA integration
@@ -94,6 +97,8 @@ class Service:
             cam.bodies = self.bodies
             if self.mqtt:
                 cam.weather = self.mqtt.weather
+        if self.faces is None and any(c.settings["faces"]["enabled"] for c in cfg.cameras):
+            self._download_faces()      # on via the web page or the Configuration tab, models not here
 
         self.retention = RetentionWorker(cfg.clips_dir, cfg.retention_days, cfg.retention_max_gb,
                                          self._after_cleanup,
@@ -158,6 +163,10 @@ class Service:
         elif coral:
             log.warning("Coral model %s not found; see the guide 'Google Coral'", coral)
         path = Path(self.cfg.model["path"])
+        fallback = self.cfg.model.get("fallback_path")
+        if not path.exists() and fallback and Path(fallback).exists():
+            log.warning("Object model %s not found; using %s", path, fallback)
+            path = Path(fallback)
         if not path.exists():
             log.error("Model %s not found; object detection off, motion detection only. "
                       "See the guide: 'Exporting the model'.", path)
@@ -165,6 +174,14 @@ class Service:
         try:
             return ObjectDetector(path, self.cfg.model["device"], size)
         except Exception as exc:  # noqa: BLE001
+            fallback = self.cfg.model.get("fallback_path")
+            if fallback and Path(fallback).exists() and Path(fallback) != path:
+                # e.g. the iGPU model (OpenVINO) does not work here: the ONNX model on the CPU
+                log.warning("Object model %s not usable (%s); falling back to %s", path.name, exc, fallback)
+                try:
+                    return ObjectDetector(fallback, "CPU", size)
+                except Exception as exc2:  # noqa: BLE001
+                    exc = exc2
             log.error("Loading the object model failed (%s); motion detection only", exc)
             return None
 
@@ -218,8 +235,7 @@ class Service:
         from .faces import FaceRecognizer
         models_dir = Path(self.cfg.model["path"]).parent
         if not FaceRecognizer.available(models_dir):
-            log.error("Face models missing in %s; face recognition off. "
-                      "See the guide: 'Face recognition'.", models_dir)
+            log.info("Face models not in %s yet; they are downloaded in the background", models_dir)
             return None
         try:
             # faces on the iGPU as soon as it already runs the object model
@@ -246,11 +262,42 @@ class Service:
         settings = self.cameras[cam].cfg.settings
         return {path: get_path(settings, path) for path in EDITABLE}
 
+    def _download_faces(self) -> None:
+        """Face recognition turned on while the models are not there yet (they are only fetched at
+        start for cameras that have it on in the config): fetch them in the background, then switch
+        it on for the cameras that want it."""
+        from .models import fetch_face_models
+        with self._faces_lock:
+            if self.faces_downloading:
+                return
+            self.faces_downloading = True
+
+        def run():
+            try:
+                if not fetch_face_models(Path(self.cfg.model["path"]).parent):
+                    return
+                faces = self._load_faces(force=True)
+                if faces is None:
+                    return
+                self.faces = faces
+                self.bodies = self._load_bodies()
+                for cam in self.cameras.values():
+                    if cam.cfg.settings["faces"]["enabled"]:
+                        cam.apply_settings({}, self.faces, self.plates)
+                    cam.bodies = self.bodies
+                log.info("Face models downloaded; face recognition is on")
+            finally:
+                self.faces_downloading = False
+
+        threading.Thread(target=run, name="face-models", daemon=True).start()
+
     def set_settings(self, cam: str, values: dict) -> dict:
+        downloading = False
         if values.get("faces.enabled") and self.faces is None:
             self.faces = self._load_faces(force=True)
             if self.faces is None:
-                raise ValueError("Face models are missing on the server")
+                self._download_faces()
+                downloading = True
         if values.get("plates.enabled") and self.plates is None:
             self.plates = self._load_plates(force=True)
             if self.plates is None:

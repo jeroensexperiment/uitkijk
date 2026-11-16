@@ -15,8 +15,9 @@ import numpy as np
 from .events import EventRecord, unknown_person
 from .faces import FaceGroup, FaceMatch, FaceRecognizer, confirmed_weak, summarize
 from .camera_base import (
-    ARRIVAL_WINDOW, ASK_FACE_AT, ActiveEvent, BODY_ATTEMPTS, BODY_INTERVAL, BODY_MIN_FRAC, RESCAN_BODY_STEP,
-    RESCAN_MAX_SECONDS, RESCAN_MIN_FRAMES, RESCAN_STEP, UNKNOWN_PERSON_DELAY, _RESCAN_SLOT, _RESCAN_WAITING,
+    ARRIVAL_WINDOW, ASK_FACE_AT, ActiveEvent, BODY_ATTEMPTS, BODY_INTERVAL, BODY_MIN_FRAC, MIN_FACE_PX, RESCAN_BODY_STEP,
+    RESCAN_MAX_SECONDS, RESCAN_MIN_FRAMES, RESCAN_STEP, UNKNOWN_PERSON_DELAY, UNKNOWN_QUALITY, _RESCAN_SLOT,
+    _RESCAN_WAITING, face_size_estimate, frac_box, head_region,
     log,
 )
 
@@ -39,12 +40,25 @@ class FacesMixin:
         """Start face recognition in the background (lock already held)."""
         ev = self.event
         fcfg = self.cfg.settings["faces"]
+        if self.faces is None and fcfg.get("enabled") and not getattr(self, "_faces_off_noted", False):
+            self._faces_off_noted = True
+            log.info("[%s] face recognition is on for this camera, but the face models are not loaded "
+                     "(yet); see the log for 'Face models'", self.name)
         if (self.faces is None or ev is None or not boxes or self._face_busy
-                or ev.face_attempts >= int(fcfg["attempts"])
                 or now - ev.last_face_try < float(fcfg["interval_seconds"])
                 or len({f.name for f in ev.faces if f.name and f.score >= self.faces.backend.learn})
                 >= len(boxes)):
             return                  # only stop once someone is recognised with confidence
+        # Only try when a face could be large enough: someone walking up from far away would
+        # otherwise use up all attempts before being close. Once the attempts are used up, someone
+        # who came clearly closer (a larger face) still gets a few more.
+        size = max(face_size_estimate(b, sub_shape, getattr(self, "_main_shape", (1080, 1920))) for b in boxes)
+        if size < MIN_FACE_PX * 0.8:
+            return
+        limit = int(fcfg["attempts"])
+        if ev.face_attempts >= limit and (ev.face_attempts >= 2 * limit or size < 1.4 * ev.face_best_size):
+            return
+        ev.face_best_size = max(ev.face_best_size, size)
         ev.face_attempts += 1
         ev.last_face_try = now
         self._face_busy = True
@@ -61,31 +75,43 @@ class FacesMixin:
                 frame = self.latest_bgr.copy()
             if frame is None:
                 return
+            self._main_shape = frame.shape[:2]
             sy, sx = frame.shape[0] / sub_shape[0], frame.shape[1] / sub_shape[1]
             matches: list[FaceMatch] = []
+            too_small: list[int] = []
+            marks = []                         # (time, "face", name, person box) for playback
+            searched = []                      # size of each searched area, for the log
             if not boxes:                       # no known person position (doorbell): whole frame
-                matches = self.faces.analyse(frame)
+                matches = self.faces.analyse(frame, too_small=too_small)
+                searched.append(f"{frame.shape[1]}x{frame.shape[0]}")
             for x1, y1, x2, y2 in boxes:
-                # upper part of the person, slightly wider: that is where the head is
-                bw, bh = x2 - x1, y2 - y1
-                cx1 = int(max(0, (x1 - 0.2 * bw) * sx))
-                cx2 = int(min(frame.shape[1], (x2 + 0.2 * bw) * sx))
-                cy1 = int(max(0, (y1 - 0.1 * bh) * sy))
-                cy2 = int(min(frame.shape[0], (y1 + 0.6 * bh) * sy))
+                # a square around the head, roomy: the person moved on a little since the detection
+                cx1, cy1, cx2, cy2 = head_region((x1, y1, x2, y2), sx, sy, frame.shape[:2])
+                searched.append(f"{cx2 - cx1}x{cy2 - cy1}")
                 if cx2 - cx1 < 40 or cy2 - cy1 < 40:
                     continue
-                matches += self.faces.analyse(frame[cy1:cy2, cx1:cx2])
+                found = self.faces.analyse(frame[cy1:cy2, cx1:cx2], too_small=too_small)
+                matches += found
+                marks += [(time.monotonic(), "face", m.name or "", frac_box((x1, y1, x2, y2), sub_shape))
+                          for m in found]
             if not matches and boxes:
                 # nothing in the crop (head at the edge of the box, filmed from above):
                 # search the whole sharp frame instead
-                matches = self.faces.analyse(frame)
+                matches = self.faces.analyse(frame, too_small=too_small)
+                searched.append(f"{frame.shape[1]}x{frame.shape[0]}")
             if not matches:
+                # say why, so a camera that never yields faces can be adjusted
+                why = (f"face too small ({max(too_small)} px, needs {MIN_FACE_PX})" if too_small
+                       else "no face found (turned away, too dark or too far)")
+                log.info("[%s] face search: %s; searched %s px of the %dx%d image",
+                         self.name, why, ", ".join(searched) or "nothing", frame.shape[1], frame.shape[0])
                 return
             with self._lock:
                 ev = self.event if self.event and self.event.id == event_id else None
                 if ev is not None:
                     # keep all attempts together (best images first); the choice is made per person
                     ev.faces = sorted(ev.faces + matches, key=lambda m: -m.quality)[:16]
+                    ev.marks = (ev.marks + marks)[-200:]
                     matches = ev.faces
             groups = summarize(matches, self.faces.backend.group)
             known = next((g for g in groups if g.name), None)
@@ -196,6 +222,8 @@ class FacesMixin:
                     rel = str((day_dir / f"{base}.face{n}.jpg").relative_to(self.clips_dir))
                 used.add(rel)
                 (self.clips_dir / rel).write_bytes(g.best.crop_jpg)
+                if g.best.view_jpg:         # larger image, for clicking the face on the web page
+                    (self.clips_dir / rel).with_suffix(".view.jpg").write_bytes(g.best.view_jpg)
                 faces.append({"crop": rel, "name": g.name, "score": g.score, "quality": g.best.quality})
             js = self.store.json_path(str(mp4.relative_to(self.clips_dir)))
             likely = self._likely_residents(ev, faces)
@@ -344,6 +372,9 @@ class FacesMixin:
                     recognizer.learn_auto(g)
                 elif not g.name and fcfg.get("collect_unknown", True):
                     sid = recognizer.unknown.add(g.best, self.name, when, f["crop"])
+                    if sid is None:
+                        log.info("[%s] unknown face not kept for naming later: quality %.2f (needs %.2f); "
+                                 "it can still be named in the clip", self.name, g.best.quality, UNKNOWN_QUALITY)
                     group = recognizer.unknown.group_of(sid) if sid else None
                     # ask who it is: the first time and again when someone keeps coming
                     if group and group["count"] in ASK_FACE_AT and self.mqtt:

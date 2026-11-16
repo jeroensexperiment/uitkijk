@@ -4,8 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#090e18">
-  <link rel="manifest" href="/manifest.json">
-  <link rel="apple-touch-icon" href="/icon-180.png">
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="icon-180.png">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="Uitkijk">
@@ -93,6 +93,7 @@
     .dot { width: .5rem; height: .5rem; border-radius: 50%; background: var(--me-text-muted); display: inline-block; flex-shrink: 0; }
     .dot.on { background: var(--me-success); }
     .dot.off { background: var(--me-danger); }
+    .dot.warn { background: var(--me-warning); }
     .name { display: flex; align-items: center; gap: .5rem; }
     .badge { display: inline-flex; align-items: center; gap: .35rem; font-size: .7rem; font-weight: 600; padding: .2rem .55rem; border-radius: var(--me-radius-pill); background: var(--me-elevated); color: var(--me-text-secondary); white-space: nowrap; }
     .badge.rec { background: var(--me-warning-soft); color: var(--me-warning); }
@@ -186,6 +187,27 @@
     dialog:has(.faces:not(:empty)) video { max-height: calc(100dvh - 300px); }
     dialog:has(#pFaces:not(:empty)):has(#pPlates:not(:empty)) video { max-height: calc(100dvh - 400px); }
     dialog:has(#pAi:not(:empty)) video { max-height: calc(100dvh - 330px); }
+    .pv-wrap { position: relative; }
+    /* timeline beside the player: recordings as bars on a time axis, newest at the top */
+    .player-layout { display: flex; min-height: 0; }
+    .player-main { flex: 1; min-width: 0; }
+    .rail { width: 8.5rem; flex-shrink: 0; display: flex; flex-direction: column; border-left: 1px solid var(--me-border); background: var(--me-bg); }
+    .rail-scroll { flex: 1; overflow-y: auto; max-height: calc(100dvh - 90px); scrollbar-width: thin; }
+    .rail-inner { position: relative; }
+    .rail-tick { position: absolute; left: 0; right: 0; border-top: 1px solid var(--me-border); font-size: .66rem; color: var(--me-text-muted); padding: 1px 0 0 .35rem; font-variant-numeric: tabular-nums; pointer-events: none; }
+    .rail-tick.day { border-top-color: var(--me-border-strong); color: var(--me-text); font-weight: 600; }
+    .rail-ev { position: absolute; left: 2.9rem; right: .45rem; min-height: 4px; border: 0; border-radius: 3px; padding: 0; cursor: pointer; opacity: .75; }
+    .rail-ev:hover { opacity: 1; }
+    .rail-ev.minor { opacity: .35; }
+    .rail-ev.cur { opacity: 1; outline: 2px solid var(--me-text); outline-offset: 1px; z-index: 1; }
+    .rail-zoom { display: flex; justify-content: center; gap: .4rem; padding: .45rem; border-top: 1px solid var(--me-border); }
+    .rail-zoom .icon-btn { font-size: 1.1rem; }
+    @media (max-width: 760px) { .rail { display: none; } }
+    img[data-zoom] { cursor: zoom-in; }
+    .zoom-body { display: grid; justify-items: center; gap: .8rem; padding: 1rem; }
+    .zoom-face { width: min(16rem, 70vw); aspect-ratio: 1; object-fit: cover; border-radius: var(--me-radius-card); border: 1px solid var(--me-border-strong); background: var(--me-bg); }
+    .zoom-ctx { width: 100%; max-height: 55dvh; object-fit: contain; border-radius: var(--me-radius-sm); background: var(--me-bg); }
+    .pv-boxes { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
     /* AI description */
     .ai-box { padding: .8rem 1rem; border-top: 1px solid var(--me-border); display: grid; gap: .45rem; }
     .ai-box:empty { display: none; }
@@ -314,6 +336,7 @@
     .seg button { font: inherit; font-size: .8rem; font-weight: 500; padding: .3rem .85rem; border-radius: var(--me-radius-pill); color: var(--me-text-secondary); background: none; border: 0; }
     .seg button[aria-selected=true] { background: var(--me-primary); color: var(--me-bg); font-weight: 600; }
     .m-draft { fill: var(--me-primary-soft); stroke: var(--me-primary); stroke-width: 2; stroke-dasharray: 6 4; }
+    .config-text { width: 100%; min-height: min(60dvh, 640px); resize: vertical; padding: .75rem; font: .8rem/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: var(--me-text); background: var(--me-bg); border: 1px solid var(--me-border); border-radius: var(--me-radius-md); tab-size: 2; }
     .btn.primary { background: var(--me-primary); border-color: var(--me-primary); color: var(--me-bg); font-weight: 600; }
     .btn.primary:hover:not(:disabled) { background: var(--me-primary); box-shadow: var(--me-glow-subtle); }
 
@@ -445,6 +468,7 @@
   </div>
 
   <dialog id="player" aria-labelledby="pTitle">
+    <div class="player-layout"><div class="player-main">
     <div class="player-head">
       <div>
         <h3 id="pTitle"></h3>
@@ -454,7 +478,10 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
       </button>
     </div>
-    <video id="pVideo" controls playsinline preload="metadata"></video>
+    <div class="pv-wrap">
+      <video id="pVideo" controls playsinline preload="metadata"></video>
+      <canvas id="pBoxes" class="pv-boxes" aria-hidden="true"></canvas>
+    </div>
     <div class="faces" id="pFaces"></div>
     <div class="faces" id="pPlates"></div>
     <div class="ai-box" id="pAi" aria-live="polite"></div>
@@ -467,11 +494,21 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>
         </button>
       </div>
+      <button class="chip" id="pBoxesBtn" aria-pressed="true" title="Show what was detected (boxes) while playing">Detections</button>
       <button class="btn" id="pFalse" title="Nothing to worry about: ignore this spot for this kind of object from now on (N)">Nothing to worry about</button>
       <button class="btn danger" id="pDelete" title="Delete this recording for good (Delete)">Delete</button>
       <a class="btn" id="pDownload" download>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11m0 0l-4-4m4 4l4-4M5 20h14"/></svg>Download
       </a>
+    </div>
+    </div>
+    <aside class="rail" aria-label="Timeline: earlier recordings">
+      <div class="rail-scroll" id="railScroll"><div class="rail-inner" id="railInner"></div></div>
+      <div class="rail-zoom">
+        <button class="icon-btn" id="railOut" title="Zoom out (more hours)" aria-label="Zoom out">−</button>
+        <button class="icon-btn" id="railIn" title="Zoom in (more detail)" aria-label="Zoom in">+</button>
+      </div>
+    </aside>
     </div>
   </dialog>
 
@@ -533,6 +570,24 @@
     <iframe class="live-frame" id="liveFrame" title="Live camera view" allow="autoplay; fullscreen"></iframe>
   </dialog>
 
+  <dialog id="zoomDlg" aria-labelledby="zoomTitle">
+    <div class="player-head">
+      <div><h3 id="zoomTitle">Face</h3><div class="muted" id="zoomSub"></div></div>
+      <button class="icon-btn" data-dlg-close="zoomDlg" aria-label="Close">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </button>
+    </div>
+    <div class="zoom-body">
+      <img id="zoomFace" class="zoom-face" alt="">
+      <img id="zoomCtx" class="zoom-ctx" alt="The moment this face was seen" hidden>
+      <video id="zoomVideo" class="zoom-ctx" controls playsinline hidden></video>
+    </div>
+    <div class="player-foot" id="zoomFoot" hidden>
+      <span class="muted">The moment this face was seen</span>
+      <button class="btn" id="zoomPlay">Play the clip</button>
+    </div>
+  </dialog>
+
   <dialog id="manageDlg" aria-labelledby="manageTitle">
     <div class="player-head">
       <div><h3 id="manageTitle">Manage</h3><div class="muted">Settings, masks and the server. You do not need this for daily use.</div></div>
@@ -541,6 +596,20 @@
       </button>
     </div>
     <div id="manageBody"></div>
+  </dialog>
+
+  <dialog id="configDlg" aria-labelledby="configTitle">
+    <div class="player-head">
+      <div><h3 id="configTitle">Configuration</h3><div class="muted" id="configPath">The whole configuration file. It is checked before saving; the service then restarts.</div></div>
+      <button class="icon-btn" data-dlg-close="configDlg" aria-label="Close">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </button>
+    </div>
+    <div class="people"><textarea class="config-text" id="configText" spellcheck="false" aria-label="Configuration file"></textarea></div>
+    <div class="player-foot">
+      <span class="mask-hint" id="configMsg">All options are listed in config.example.yaml.</span>
+      <div class="btns"><button class="btn primary" id="configSave">Save and restart</button></div>
+    </div>
   </dialog>
 
   <dialog id="cmpDlg" aria-labelledby="cmpTitle">
@@ -623,7 +692,7 @@
 
     async function api(path) {
       const r = await fetch(path, { cache: "no-store" });
-      if (r.status === 401) { location.href = `/login?next=${encodeURIComponent(location.pathname + location.search)}`; throw new Error(401); }
+      if (r.status === 401) { location.href = `login?next=${encodeURIComponent(location.pathname + location.search)}`; throw new Error(401); }
       if (!r.ok) throw new Error(r.status);
       return r.json();
     }
@@ -675,7 +744,7 @@
     function refreshFrames() {
       // load first, then swap: no flicker
       document.querySelectorAll("[data-frame]").forEach((el) => {
-        const url = `/api/cameras/${encodeURIComponent(el.dataset.frame)}/frame.jpg?t=${Date.now()}`;
+        const url = `api/cameras/${encodeURIComponent(el.dataset.frame)}/frame.jpg?t=${Date.now()}`;
         const img = new Image();
         img.onload = () => { frames[el.dataset.frame] = url; el.style.backgroundImage = `url("${url}")`; };
         img.src = url;
@@ -688,7 +757,8 @@
       $("filterToggle").innerHTML = `Filter${active ? ` <b>${active}</b>` : ""}`;
       $("camChips").innerHTML = [{ name: null, friendly_name: "All cameras" }, ...state.cams].map((c) =>
         `<button class="chip" data-cam="${esc(c.name ?? "")}" aria-pressed="${state.camera === c.name}">${esc(c.friendly_name)}</button>`).join("");
-      $("labelChips").innerHTML = [[null, { name: "All" }], ...Object.entries(LABELS)].map(([k, l]) =>
+      const labels = Object.entries(LABELS).filter(([k]) => k !== "doorbell" || state.hasDoorbell || state.label === k);
+      $("labelChips").innerHTML = [[null, { name: "All" }], ...labels].map(([k, l]) =>
         `<button class="chip" data-label="${k ?? ""}" aria-pressed="${state.label === k}">${k ? `<span class="sw" style="background:${l.color}"></span>` : ""}${l.name}</button>`).join("");
       const people = Object.keys(state.faces.people);
       const cars = Object.entries(state.plates.known);
@@ -698,9 +768,25 @@
         : "") + cars.map(([plate, name]) =>
           `<button class="chip" data-plate="${esc(plate)}" aria-pressed="${state.plate === plate}" title="${esc(plate)}"><span class="sw" style="background:var(--me-violet)"></span>${esc(name)}</button>`).join("");
     }
+    // CPU of the machine and how busy the detector is (Coral = TPU, iGPU = GPU), over the last seconds
+    function usagePill(u) {
+      if (!u || (u.system_cpu == null && u.app_cpu == null)) return "";
+      const pct = (v) => `${Math.round(v)}%`;
+      const cpu = u.system_cpu ?? u.app_cpu;
+      const d = u.detector;
+      const dev = d ? ({ "Edge TPU": "TPU" }[d.device] || d.device) : null;
+      const tip = [`Machine CPU ${pct(cpu)}`];
+      if (u.app_cpu != null) tip.push(`Uitkijk ${pct(u.app_cpu)} of all ${u.cpu_count} cores`);
+      if (d) tip.push(`Detection on ${d.device} (${d.backend})` + (d.fps != null
+        ? `: ${d.fps} images/s${d.ms != null ? `, ${d.ms} ms each` : ""}, busy ${pct(d.busy)}` : ""));
+      const hot = cpu >= 80 ? "off" : cpu >= 50 ? "warn" : "on";
+      return `<span class="pill" title="${esc(tip.join("\n"))}"><span class="dot ${hot}"></span>CPU <b>${pct(cpu)}</b>${
+        d && d.accelerated && d.busy != null ? ` <span class="muted">·</span> ${esc(dev)} <b>${pct(d.busy)}</b>` : ""}${
+        d && !d.accelerated && d.busy != null ? ` <span class="muted">· detection ${pct(d.busy)} of 1 core</span>` : ""}</span>`;
+    }
     async function loadStatus() {
       try {
-        const [cams, st] = await Promise.all([api("/api/cameras"), api("/api/status")]);
+        const [cams, st] = await Promise.all([api("api/cameras"), api("api/status")]);
         $("banner").classList.remove("show");
         const first = !state.cams.length;
         state.cams = cams;
@@ -710,6 +796,7 @@
         const gb = st.storage.used_gb.toLocaleString(undefined, { maximumFractionDigits: 1 });
         $("stats").innerHTML = `
           <span class="pill"><span class="dot ${cams.every((c) => c.online) ? "on" : "off"}"></span><b>${cams.filter((c) => c.online).length}/${cams.length}</b> online</span>
+          ${usagePill(st.usage)}
           ${state.faces.enabled ? `<button class="pill link" id="openPeople">Faces <b>${Object.keys(state.faces.people).length}</b>${state.faces.unknown ? ` <span class="muted">· ${state.faces.unknown} unknown</span>` : ""}</button>` : ""}
           ${state.plates.enabled ? `<button class="pill link" id="openPlates">Plates <b>${Object.keys(state.plates.known).length}</b></button>` : ""}
           <button class="pill link" id="openManage" title="Settings, masks, storage and server">Manage${
@@ -735,7 +822,7 @@
       if (state.day && !state.q) p.set("day", state.day);
       if (state.important) p.set("important", "true");
       if (state.near) p.set("near", "true");
-      return `/api/events?${p}`;
+      return `api/events?${p}`;
     }
     let loadSeq = 0;
     async function loadEvents(reset = true) {
@@ -767,7 +854,7 @@
     }
     async function renderKeys() {
       let list = [];
-      try { list = (await api("/api/auth/credentials")).credentials; } catch {}
+      try { list = (await api("api/auth/credentials")).credentials; } catch {}
       $("keysList").innerHTML = list.length ? list.map((c) => `
         <div class="person"><h3><span>${esc(c.name)} <span class="muted" style="font-size:.78rem;font-weight:500;margin-left:.35rem">since ${esc(c.created)} · last used ${esc(c.last_used)}</span></span>
           <button class="link-red" data-key-del="${esc(c.id)}">Remove</button></h3></div>`).join("")
@@ -777,26 +864,26 @@
       const name = (prompt("Name of this device:", /iPhone/.test(navigator.userAgent) ? "iPhone" : "MacBook") || "").trim();
       if (!name) return;
       try {
-        const { challenge_id, options: o } = await postJSON("/api/auth/register/options");
+        const { challenge_id, options: o } = await postJSON("api/auth/register/options");
         o.challenge = unb64(o.challenge); o.user.id = unb64(o.user.id);
         o.excludeCredentials = (o.excludeCredentials || []).map((c) => ({ ...c, id: unb64(c.id) }));
         const c = await navigator.credentials.create({ publicKey: o });
         const response = { clientDataJSON: b64(c.response.clientDataJSON), attestationObject: b64(c.response.attestationObject),
                            transports: c.response.getTransports ? c.response.getTransports() : [] };
-        await postJSON("/api/auth/register", { challenge_id, name,
+        await postJSON("api/auth/register", { challenge_id, name,
           credential: { id: c.id, rawId: b64(c.rawId), type: c.type, response, clientExtensionResults: c.getClientExtensionResults() } });
         renderKeys();
       } catch (e) { if (e.name !== "NotAllowedError") alert(e.message); }
     };
-    $("keysLogout").onclick = async () => { await postJSON("/api/auth/logout"); location.href = "/login"; };
+    $("keysLogout").onclick = async () => { await postJSON("api/auth/logout"); location.href = "login"; };
     $("keysLogoutAll").onclick = async () => {
       if (!confirm("Log out all devices? You will have to log in again everywhere with your passkey.")) return;
-      await postJSON("/api/auth/logout-all"); location.href = "/login";
+      await postJSON("api/auth/logout-all"); location.href = "login";
     };
     $("keysList").addEventListener("click", async (ev) => {
       const del = ev.target.closest("[data-key-del]");
       if (!del || !confirm("Remove this passkey? That device will no longer be able to log in.")) return;
-      await fetch(`/api/auth/credentials/${encodeURIComponent(del.dataset.keyDel)}`, { method: "DELETE" });
+      await fetch(`api/auth/credentials/${encodeURIComponent(del.dataset.keyDel)}`, { method: "DELETE" });
       renderKeys();
     });
 
@@ -814,7 +901,7 @@
       const p = new URLSearchParams();
       if (state.camera) p.set("camera", state.camera);
       if (state.label) p.set("label", state.label);
-      try { state.days = (await api(`/api/days?${p}`)).days; } catch { return; }
+      try { state.days = (await api(`api/days?${p}`)).days; } catch { return; }
       renderDays();
     }
     function dayList() {
@@ -854,7 +941,7 @@
       const el = $("summary");
       if (!state.day || state.q) { el.innerHTML = ""; return; }
       let s;
-      try { s = await api(`/api/summary?day=${state.day}`); } catch { el.innerHTML = ""; return; }
+      try { s = await api(`api/summary?day=${state.day}`); } catch { el.innerHTML = ""; return; }
       const known = Object.keys(s.people).length;
       const stat = (n, label, acc) => `<div class="stat${n ? "" : " zero"}" style="--acc:var(${acc})"><b>${n}</b><span>${label}</span></div>`;
       const hours = s.per_hour || [];
@@ -923,7 +1010,7 @@
           last = key;
         }
         const l = LABELS[e.label] || LABELS.motion;
-        const snap = e.snapshot ? `style="background-image:url('/clips/${encodeURI(e.snapshot)}')"` : "";
+        const snap = e.snapshot ? `style="background-image:url('clips/${encodeURI(e.snapshot)}')"` : "";
         const names = [knownNames(e), ...(e.plates || []).map((p) => state.plates.known[p.plate] || p.plate)].filter(Boolean).join(", ");
         const likely = !knownNames(e) && e.likely?.length ? `probably ${e.likely.join(", ")}` : "";
         html += `<button class="ev${e.false_alarm ? " false-alarm" : ""}${e.seen === false ? " unseen" : ""}${state.select?.has(e.clip) ? " sel" : ""}" data-i="${i}"${state.select ? ` aria-pressed="${state.select.has(e.clip)}"` : ""}>
@@ -949,8 +1036,8 @@
     }
     const postJson = (url, body) => fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
     async function deleteClips(clips) {
-      const r = await postJson("/api/events/delete", { clips });
-      if (r.status === 401) { location.href = "/login"; return false; }
+      const r = await postJson("api/events/delete", { clips });
+      if (r.status === 401) { location.href = "login"; return false; }
       if (!r.ok) { alert((await r.json().catch(() => ({}))).detail || "Deleting failed"); return false; }
       return true;
     }
@@ -960,7 +1047,7 @@
       if (act === "seen") markSeen(picked);
       if (act === "false") {
         for (const e of picked.filter((e) => !e.false_alarm)) {
-          const r = await postJson("/api/events/false-alarm", { clip: e.clip, false_alarm: true });
+          const r = await postJson("api/events/false-alarm", { clip: e.clip, false_alarm: true });
           if (r.ok) e.false_alarm = (await r.json()).false_alarm;
         }
       }
@@ -984,7 +1071,7 @@
       const clips = items.filter((e) => e.seen === false).map((e) => e.clip);
       if (!clips.length) return;
       items.forEach((e) => { if (e.seen === false) e.seen = true; });
-      fetch("/api/events/seen", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clips }) }).catch(() => {});
+      fetch("api/events/seen", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clips }) }).catch(() => {});
     }
     function openEvent(i) {
       const e = state.items[i];
@@ -1010,14 +1097,16 @@
         + (e.false_alarm === "ai" ? " · probably nothing: the AI saw no one" : e.false_alarm ? " · marked as nothing to worry about" : "");
       $("pFalse").textContent = e.false_alarm ? "Important after all" : "Nothing to worry about";
       const v = $("pVideo");
-      v.poster = e.snapshot ? `/clips/${encodeURI(e.snapshot)}` : "";
-      v.src = `/clips/${encodeURI(e.clip)}`;
+      v.poster = e.snapshot ? `clips/${encodeURI(e.snapshot)}` : "";
+      v.src = `clips/${encodeURI(e.clip)}`;
       v.play().catch(() => {});
       $("pDownload").href = v.src;
       $("pDownload").download = `${e.camera}_${e.clip.split("/").pop()}`;
       renderFaces(e);
       renderPlates(e);
       renderAi(e);
+      loadBoxes(e);
+      showRail();
       $("pPrev").disabled = i <= 0;
       $("pNext").disabled = i >= state.items.length - 1 && state.items.length >= state.total;
       if (!$("player").open) $("player").showModal();
@@ -1028,6 +1117,194 @@
       if (i >= state.items.length && state.items.length < state.total) await loadEvents(false);
       openEvent(i);
     }
+    // ---------- timeline beside the player ----------
+    // The recordings with the same filter as the list, as bars on a time axis (newest at the top),
+    // so you can scroll back and click an earlier one, like the review timeline in Frigate.
+    const rail = { items: [], key: "", loaded: 0, pxPerHour: 120 };
+    try { rail.pxPerHour = Number(localStorage.getItem("camsvc-rail-zoom")) || 120; } catch {}
+    const evEnd = (e) => e.end ? new Date(e.end).getTime() : new Date(e.start).getTime() + (e.duration || 0) * 1000;
+    async function loadRail() {
+      const key = query(0, 200);
+      if (key === rail.key && Date.now() - rail.loaded < 30000) return;
+      try {
+        rail.items = (await api(key)).items;
+        rail.key = key; rail.loaded = Date.now();
+      } catch { rail.items = []; }
+    }
+    function renderRail() {
+      const inner = $("railInner");
+      if (!rail.items.length) { inner.innerHTML = ""; inner.style.height = "0"; return; }
+      const H = 3600e3, px = rail.pxPerHour;
+      const top = Math.max(Date.now(), ...rail.items.map(evEnd));
+      const oldest = Math.min(...rail.items.map((e) => new Date(e.start).getTime()));
+      const y = (t) => (top - t) / H * px;
+      inner.style.height = `${Math.ceil(y(oldest) + 40)}px`;
+      const step = (px >= 360 ? 0.25 : px >= 180 ? 0.5 : px >= 60 ? 1 : px >= 30 ? 2 : 4) * H;
+      let html = "";
+      // ticks on the local clock (so midnight gets the day label at every zoom level)
+      const first = new Date(top), stepMin = step / 60000;
+      first.setHours(0, Math.floor((first.getHours() * 60 + first.getMinutes()) / stepMin) * stepMin, 0, 0);
+      for (let t = first.getTime(); t > oldest - step; t -= step) {
+        const d = new Date(t);
+        const midnight = d.getHours() === 0 && d.getMinutes() === 0;
+        html += `<div class="rail-tick${midnight ? " day" : ""}" style="top:${y(t).toFixed(1)}px">${midnight ? esc(dayLabel(d)) : fmtTime(d.toISOString())}</div>`;
+      }
+      const cur = state.items[state.current];
+      rail.items.forEach((e, k) => {
+        const t0 = new Date(e.start).getTime(), t1 = evEnd(e);
+        const l = LABELS[e.label] || LABELS.motion;
+        const names = [knownNames(e), ...(e.plates || []).map((p) => state.plates.known[p.plate] || p.plate)].filter(Boolean).join(", ");
+        const tip = `${fmtTime(e.start)} · ${l.name} · ${camName(e.camera)}${names ? ` · ${names}` : ""}`;
+        html += `<button class="rail-ev${e.label === "motion" || e.false_alarm ? " minor" : ""}${cur && cur.clip === e.clip ? " cur" : ""}" data-rail="${k}"
+          style="top:${y(t1).toFixed(1)}px;height:${Math.max(4, y(t0) - y(t1)).toFixed(1)}px;background:${l.color}" title="${esc(tip)}" aria-label="${esc(tip)}"></button>`;
+      });
+      inner.innerHTML = html;
+    }
+    function railToCurrent() {
+      const b = $("railInner").querySelector(".rail-ev.cur");
+      if (b) { const s = $("railScroll"); s.scrollTop = b.offsetTop - s.clientHeight / 2; }
+    }
+    async function showRail() {
+      await loadRail();
+      renderRail();
+      railToCurrent();
+    }
+    async function openRailEvent(k) {
+      const e = rail.items[k];
+      if (!e) return;
+      // the list uses the same filter and order: load pages until the recording is in it
+      let i = state.items.findIndex((x) => x.clip === e.clip);
+      while (i < 0 && state.items.length < state.total) {
+        await loadEvents(false);
+        i = state.items.findIndex((x) => x.clip === e.clip);
+      }
+      if (i >= 0) openEvent(i);
+    }
+    function zoomRail(factor) {
+      const s = $("railScroll");
+      const centre = (s.scrollTop + s.clientHeight / 2) / rail.pxPerHour;   // hours from the top
+      rail.pxPerHour = Math.min(960, Math.max(15, rail.pxPerHour * factor));
+      try { localStorage.setItem("camsvc-rail-zoom", String(rail.pxPerHour)); } catch {}
+      renderRail();
+      s.scrollTop = centre * rail.pxPerHour - s.clientHeight / 2;
+    }
+    $("railIn").addEventListener("click", () => zoomRail(2));
+    $("railOut").addEventListener("click", () => zoomRail(0.5));
+    $("railInner").addEventListener("click", (ev) => {
+      const b = ev.target.closest("[data-rail]");
+      if (b) openRailEvent(Number(b.dataset.rail));
+    });
+    // ---------- detection boxes while playing a clip ----------
+    // <clip>.boxes holds per analysed frame [seconds from clip start, [[kind, label, score, x1, y1, x2, y2], ...]]
+    // with the box as fractions of the frame. Shown over the video; the choice is kept per browser.
+    const KIND_NAMES = { person: "Person", bicycle: "Bicycle", car: "Car", motorcycle: "Motorcycle", bus: "Bus",
+      truck: "Truck", bird: "Bird", cat: "Cat", dog: "Dog", vehicle: "Vehicle", animal: "Animal" };
+    const boxes = { frames: null, clip: null, event: null, on: true, key: "", raf: 0 };
+    try { boxes.on = localStorage.getItem("camsvc-boxes") !== "off"; } catch {}
+    function cssColor(c) {
+      const m = /var\((--[^)]+)\)/.exec(c || "");
+      return m ? getComputedStyle(document.documentElement).getPropertyValue(m[1]).trim() || "#4cc9f0" : c || "#4cc9f0";
+    }
+    async function loadBoxes(e) {
+      boxes.frames = null; boxes.marks = []; boxes.clip = e.clip; boxes.event = e; boxes.key = "";
+      $("pBoxesBtn").hidden = true;
+      $("pBoxesBtn").setAttribute("aria-pressed", String(boxes.on));
+      drawBoxes();
+      try {
+        const r = await fetch(`clips/${encodeURI(e.clip.replace(/\.mp4$/, ".boxes"))}`);
+        if (!r.ok || boxes.clip !== e.clip) return;
+        const data = await r.json();
+        boxes.frames = data.frames || [];
+        boxes.marks = data.marks || [];
+      } catch { return; }
+      $("pBoxesBtn").hidden = !boxes.frames.length;
+      if (!boxes.raf) boxes.raf = requestAnimationFrame(tickBoxes);
+    }
+    function tickBoxes() {
+      boxes.raf = 0;
+      if (!$("player").open || !boxes.frames) { drawBoxes(true); return; }
+      drawBoxes();
+      boxes.raf = requestAnimationFrame(tickBoxes);
+    }
+    function frameAt(t) {             // the last analysed frame at or before t (binary search)
+      const f = boxes.frames;
+      let lo = 0, hi = f.length - 1, found = -1;
+      while (lo <= hi) { const mid = (lo + hi) >> 1; if (f[mid][0] <= t) { found = mid; lo = mid + 1; } else hi = mid - 1; }
+      return found >= 0 && t - f[found][0] <= 1.0 ? f[found][1] : null;
+    }
+    function drawBoxes(clear = false) {
+      const v = $("pVideo"), cv = $("pBoxes");
+      const w = v.clientWidth, h = v.clientHeight, dpr = window.devicePixelRatio || 1;
+      const show = !clear && boxes.on && boxes.frames && v.videoWidth;
+      const items = show ? frameAt(v.currentTime) : null;
+      const key = `${w}x${h}|${items ? JSON.stringify(items) : ""}`;
+      if (key === boxes.key) return;
+      boxes.key = key;
+      cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr);
+      const ctx = cv.getContext("2d");
+      ctx.clearRect(0, 0, cv.width, cv.height);
+      if (!items?.length) return;
+      ctx.scale(dpr, dpr);
+      // the picture inside the video element (letterboxed, like object-fit: contain)
+      const s = Math.min(w / v.videoWidth, h / v.videoHeight);
+      const pw = v.videoWidth * s, ph = v.videoHeight * s, ox = (w - pw) / 2, oy = (h - ph) / 2;
+      const e = boxes.event || {};
+      const persons = items.filter((b) => b[1] === "person").length;
+      // with one person in view and one recognised face in the event, that is who it is
+      const who = persons === 1 ? knownNames(e) : "";
+      ctx.font = "600 12px system-ui, sans-serif";
+      ctx.lineWidth = 2;
+      for (const [kind, label, score, x1, y1, x2, y2, parked] of items) {
+        const color = cssColor((LABELS[label] || LABELS.motion).color);
+        const bx = ox + x1 * pw, by = oy + y1 * ph, bw = (x2 - x1) * pw, bh = (y2 - y1) * ph;
+        ctx.globalAlpha = parked ? 0.6 : 1;
+        ctx.setLineDash(parked ? [6, 4] : []);      // standing still: did not count for the event
+        ctx.strokeStyle = color;
+        ctx.strokeRect(bx, by, bw, bh);
+        ctx.setLineDash([]);
+        let extra = "";
+        if (label === "person") {
+          const m = markFor("face", [x1, y1, x2, y2], v.currentTime);
+          extra = m && m !== "unknown face" ? m : who || m;     // a name beats "unknown face"
+        } else if (label === "vehicle" && kind !== "bicycle") {
+          const p = markFor("plate", [x1, y1, x2, y2], null);
+          extra = p ? (state.plates.known[p] ? `${state.plates.known[p]} (${p})` : p) : "";
+        }
+        const text = `${KIND_NAMES[kind] || kind}${extra ? ` · ${extra}` : ""} ${Math.round(score * 100)}%`;
+        const tw = ctx.measureText(text).width + 8;
+        const ty = by >= 18 ? by - 18 : by;
+        ctx.fillStyle = color;
+        ctx.fillRect(bx - 1, ty, tw, 18);
+        ctx.fillStyle = "#0b1020";
+        ctx.fillText(text, bx + 3, ty + 13);
+        ctx.globalAlpha = 1;
+      }
+    }
+    function overlap(a, b) {          // intersection over union of two [x1, y1, x2, y2] boxes
+      const ix = Math.max(0, Math.min(a[2], b[2]) - Math.max(a[0], b[0]));
+      const iy = Math.max(0, Math.min(a[3], b[3]) - Math.max(a[1], b[1]));
+      const inter = ix * iy, area = (r) => (r[2] - r[0]) * (r[3] - r[1]);
+      return inter > 0 ? inter / (area(a) + area(b) - inter) : 0;
+    }
+    // what was read inside this box: the plate (any time: a car keeps its plate) or the name of
+    // the face (within 2 s: people move); the text read most often wins
+    function markFor(kind, box, t) {
+      const count = {};
+      let unnamed = false;            // a face was found here, but nobody recognised (yet)
+      for (const [mt, mk, text, mb] of boxes.marks || []) {
+        if (mk !== kind || (t != null && Math.abs(mt - t) > 2) || overlap(box, mb) < 0.3) continue;
+        if (!text) { unnamed = true; continue; }
+        count[text] = (count[text] || 0) + 1;
+      }
+      return Object.keys(count).sort((a, b) => count[b] - count[a])[0] || (unnamed ? "unknown face" : "");
+    }
+    $("pBoxesBtn").addEventListener("click", () => {
+      boxes.on = !boxes.on;
+      try { localStorage.setItem("camsvc-boxes", boxes.on ? "on" : "off"); } catch {}
+      $("pBoxesBtn").setAttribute("aria-pressed", String(boxes.on));
+      boxes.key = "";
+      drawBoxes();
+    });
     function closePlayer() {
       const v = $("pVideo");
       v.pause(); v.removeAttribute("src"); v.load();
@@ -1038,7 +1315,7 @@
     // ---------- faces ----------
     const knownNames = (e) => [...new Set((e.faces || []).map((f) => f.name).filter(Boolean))].join(", ");
     async function loadFaces() {
-      try { state.faces = await api("/api/faces"); } catch {}
+      try { state.faces = await api("api/faces"); } catch {}
     }
     function renderFaces(e) {
       const el = $("pFaces");
@@ -1046,7 +1323,7 @@
       const names = Object.keys(state.faces.people);
       el.innerHTML = e.faces.map((f, k) => `
         <div class="face${f.name ? " known" : ""}">
-          <img src="/clips/${encodeURI(f.crop)}" alt="">
+          <img src="clips/${encodeURI(f.crop)}" alt="Face, click to enlarge" data-zoom data-crop="${esc(f.crop)}" data-title="${f.name ? esc(f.name) : "Unknown face"}">
           <button class="del" data-face-del="${k}" aria-label="Remove face" title="Wrong face or name: remove">×</button>
           <span class="nm">${f.name ? esc(f.name) : "Unknown"}</span>
           <select data-face="${k}" aria-label="Who is this?">
@@ -1060,7 +1337,7 @@
       const e = state.currentEvent;
       const f = e?.faces?.[k];
       if (!f) return;
-      const r = await fetch(`/api/faces/${encodeURIComponent(name)}`, {
+      const r = await fetch(`api/faces/${encodeURIComponent(name)}`, {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ crop: f.crop }),
       });
       if (!r.ok) { alert((await r.json().catch(() => ({}))).detail || "Saving failed"); return; }
@@ -1082,7 +1359,7 @@
       return `<h4>Unknown faces</h4>
         <div class="unknowns">${unknownGroups.slice(0, 40).map((g, k) => `
           <div class="ugroup">
-            <div class="samples">${g.samples.map((id) => `<img src="/api/unknown-faces/${id}.jpg" alt="" loading="lazy">`).join("")}</div>
+            <div class="samples">${g.samples.map((id, j) => `<img src="api/unknown-faces/${id}.jpg" alt="Unknown face, click to enlarge" loading="lazy" data-zoom data-crop="${esc(g.crops?.[j] || "")}" data-title="Unknown face" data-sub="Seen ${g.count}× · ${esc(g.cameras.map(camName).join(", "))}">`).join("")}</div>
             <div class="meta"><b>Seen ${g.count}×</b> · ${g.first.slice(0, 10) === g.last.slice(0, 10) ? `${fmtDay(g.last)} ${fmtTime(g.last)}` : `${fmtDay(g.first)} – ${fmtDay(g.last)}`} · ${g.cameras.map((c) => esc(camName(c))).join(", ")}
               ${g.suggest ? `<br><span class="hint">Looks like ${esc(g.suggest)}</span>` : ""}</div>
             <div class="row">
@@ -1095,11 +1372,11 @@
     }
     async function renderPeople() {
       if (state.faces.enabled) {
-        try { unknownGroups = (await api("/api/unknown-faces")).groups; } catch { unknownGroups = []; }
+        try { unknownGroups = (await api("api/unknown-faces")).groups; } catch { unknownGroups = []; }
       }
       const people = Object.entries(state.faces.people);
       const auto = state.faces.auto || {};
-      const sample = (name, id, isAuto) => `<div class="sample${isAuto ? " auto" : ""}"><img src="/api/faces/${encodeURIComponent(name)}/${isAuto ? "auto/" : ""}${id}.jpg" alt="">
+      const sample = (name, id, isAuto) => `<div class="sample${isAuto ? " auto" : ""}"><img src="api/faces/${encodeURIComponent(name)}/${isAuto ? "auto/" : ""}${id}.jpg" alt="${esc(name)}, click to enlarge" data-zoom data-title="${esc(name)}" data-sub="${isAuto ? "Learned automatically" : "Named by you"}">
             <button data-del="${esc(name)}|${isAuto ? "auto/" : ""}${id}" aria-label="Remove photo">✕</button></div>`;
       $("people").innerHTML = renderUnknown() + (people.length ? people.map(([name, ids]) => {
         const autos = auto[name] || [];
@@ -1121,7 +1398,7 @@
     async function assignUnknown(k, name) {
       const g = unknownGroups[k];
       if (!g || !name) return;
-      const data = await postUnknown("/api/unknown-faces/assign", { ids: g.ids, name });
+      const data = await postUnknown("api/unknown-faces/assign", { ids: g.ids, name });
       if (!data) return;
       renderPeople(); renderChips(); state.items = []; loadEvents(); loadStatus();
     }
@@ -1135,7 +1412,7 @@
       if (!btn) return;
       const e = state.currentEvent, plate = btn.dataset.plateDel;
       if (!e || !confirm(`Remove plate ${plate} from this recording? This day then no longer counts as a visit.`)) return;
-      const r = await fetch("/api/events/remove-plate", {
+      const r = await fetch("api/events/remove-plate", {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clip: e.clip, plate }),
       });
       if (!r.ok) { alert((await r.json().catch(() => ({}))).detail || "Removing failed"); return; }
@@ -1149,12 +1426,12 @@
       const e = state.currentEvent;
       const k = Number(btn.dataset.faceDel), f = e?.faces?.[k];
       if (!f || !confirm(f.name ? `Remove the face of ${f.name} from this recording? Photos of ${f.name} learned from it are forgotten too.` : "Remove this face from this recording?")) return;
-      const r = await fetch("/api/events/remove-face", {
+      const r = await fetch("api/events/remove-face", {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ crop: f.crop }),
       });
       if (!r.ok) { alert((await r.json().catch(() => ({}))).detail || "Removing failed"); return; }
       e.faces.splice(k, 1);
-      try { state.faces = await api("/api/faces"); } catch {}
+      try { state.faces = await api("api/faces"); } catch {}
       renderFaces(e); renderTimeline(); loadStatus();
     });
 
@@ -1187,7 +1464,7 @@
     const PCT = { "motion.min_area": 100, "objects.min_score": 100 };
     const setState = { cam: null, schema: {} };
     async function openSettings(name) {
-      const data = await api(`/api/cameras/${encodeURIComponent(name)}/settings`);
+      const data = await api(`api/cameras/${encodeURIComponent(name)}/settings`);
       setState.cam = name; setState.schema = data.schema;
       $("setTitle").textContent = `Settings – ${camName(name)}`;
       $("setForm").innerHTML = SET_GROUPS.map(([title, paths]) => `<div><h4>${title}</h4>${paths.map((p) => {
@@ -1205,10 +1482,12 @@
         if (sc.type === "bool") body[p] = el.checked;
         else { const v = Number(el.value) / (PCT[p] || 1); body[p] = sc.type === "int" ? Math.round(v) : v; }
       });
-      const r = await fetch(`/api/cameras/${encodeURIComponent(setState.cam)}/settings`, {
+      const r = await fetch(`api/cameras/${encodeURIComponent(setState.cam)}/settings`, {
         method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
       });
       if (!r.ok) { alert((await r.json().catch(() => ({}))).detail || "Saving failed"); return; }
+      const saved = await r.json().catch(() => ({}));
+      if (saved.note) alert(saved.note);
       $("setDlg").close();
       await Promise.all([loadFaces(), loadPlates()]); renderChips(); loadStatus();
     };
@@ -1225,12 +1504,12 @@
     async function openMask(name) {
       mask.cam = name; mask.draft = []; mask.mode = "mask";
       const enc = encodeURIComponent(name);
-      const [m, z] = await Promise.all([api(`/api/cameras/${enc}/mask`).catch(() => ({ mask: [] })),
-                                        api(`/api/cameras/${enc}/zones`).catch(() => ({ zones: [] }))]);
+      const [m, z] = await Promise.all([api(`api/cameras/${enc}/mask`).catch(() => ({ mask: [] })),
+                                        api(`api/cameras/${enc}/zones`).catch(() => ({ zones: [] }))]);
       mask.sets.mask = { polys: m.mask || [], names: [], dirty: false };
       mask.sets.zones = { polys: (z.zones || []).map((q) => q.points), names: (z.zones || []).map((q) => q.name), dirty: false };
       $("maskTitle").textContent = `Mask and zones – ${camName(name)}`;
-      $("mImg").src = `/api/cameras/${enc}/frame.jpg?t=${Date.now()}`;
+      $("mImg").src = `api/cameras/${enc}/frame.jpg?t=${Date.now()}`;
       setMode("mask");
       $("maskDlg").showModal();
     }
@@ -1312,7 +1591,7 @@
       if (mask.sets.mask.dirty) puts.push(["mask", { mask: mask.sets.mask.polys }]);
       if (mask.sets.zones.dirty) puts.push(["zones", { zones: mask.sets.zones.polys.map((p, i) => ({ name: mask.sets.zones.names[i], points: p })) }]);
       for (const [what, body] of puts) {
-        const r = await fetch(`/api/cameras/${enc}/${what}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+        const r = await fetch(`api/cameras/${enc}/${what}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
         if (!r.ok) { alert((await r.json().catch(() => ({}))).detail || "Saving failed"); return; }
         mask.sets[what].dirty = false;
       }
@@ -1355,9 +1634,9 @@
       if (!e) return;
       $("pFalse").disabled = true;
       try {
-        const r = await fetch("/api/events/false-alarm", { method: "POST", headers: { "Content-Type": "application/json" },
+        const r = await fetch("api/events/false-alarm", { method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ clip: e.clip, false_alarm: !e.false_alarm }) });
-        if (r.status === 401) { location.href = "/login"; return; }
+        if (r.status === 401) { location.href = "login"; return; }
         if (!r.ok) throw new Error(r.status);
         const res = await r.json();
         e.false_alarm = res.false_alarm;
@@ -1373,7 +1652,7 @@
       const el = $("cmpBody");
       el.innerHTML = '<div class="muted">Loading…</div>';
       let c;
-      try { c = await api("/api/ai-comparison?days=7"); } catch { el.innerHTML = '<div class="muted">Not available.</div>'; return; }
+      try { c = await api("api/ai-comparison?days=7"); } catch { el.innerHTML = '<div class="muted">Not available.</div>'; return; }
       const stat = (n, label) => `<div class="stat"><b>${n}</b><span>${label}</span></div>`;
       if (!c.events) {
         el.innerHTML = '<div class="empty"><h3>No comparison yet</h3>As soon as the external AI in Home Assistant judges a person, it shows up here next to the local verdict.</div>';
@@ -1389,7 +1668,7 @@
         </div>
         ${c.disagree.length ? '<span class="eyebrow">Disagree</span>' : ""}
         ${c.disagree.map((r) => `<div class="cmp-row">
-          ${r.snapshot ? `<img src="/clips/${encodeURI(r.snapshot)}" alt="" loading="lazy">` : "<div></div>"}
+          ${r.snapshot ? `<img src="clips/${encodeURI(r.snapshot)}" alt="" loading="lazy">` : "<div></div>"}
           <div class="txt"><span><b>${esc(camName(r.camera))} · ${dayLabel(new Date(r.start))} ${fmtTime(r.start)}</b></span>
             <span><b>External ${r.external ? "notifies" : "does not notify"}:</b> ${esc(r.external_text || "–")}</span>
             <span><b>Local ${r.local ? "sees it" : "sees nothing"}:</b> ${esc(r.local_text || "–")}</span></div>
@@ -1397,8 +1676,12 @@
     }
 
     // ---------- licence plates ----------
+    // the Doorbell filter only once there has been a doorbell event (a ring via HA)
+    async function loadDoorbell() {
+      try { state.hasDoorbell = (await api("api/events?label=doorbell&limit=1")).total > 0; } catch {}
+    }
     async function loadPlates() {
-      try { state.plates = await api("/api/plates"); } catch {}
+      try { state.plates = await api("api/plates"); } catch {}
     }
     function renderPlates(e) {
       const el = $("pPlates");
@@ -1406,7 +1689,7 @@
       el.innerHTML = e.plates.map((p) => {
         const name = state.plates.known[p.plate];
         return `<div class="plate">
-          ${p.crop ? `<img src="/clips/${encodeURI(p.crop)}" alt="">` : ""}
+          ${p.crop ? `<img src="clips/${encodeURI(p.crop)}" alt="">` : ""}
           <button class="del" data-plate-del="${esc(p.plate)}" aria-label="Remove plate ${esc(p.plate)}" title="Misread: remove">×</button>
           <span class="plate-txt">${esc(p.plate)}</span>
           <span class="nm">${name ? esc(name) : p.visitor ? `Regular visitor <span class="muted">· ${p.visitor} days</span>` : "Unknown vehicle"}${p.source === "ai" ? ' <span class="muted">· via AI</span>' : ""}</span>
@@ -1417,7 +1700,7 @@
     async function namePlate(plate) {
       const name = (prompt(`Name for ${plate} (e.g. Our car, Grandparents):`, state.plates.known[plate] || "") || "").trim();
       if (!name) return;
-      const r = await fetch(`/api/plates/${encodeURIComponent(plate)}`, {
+      const r = await fetch(`api/plates/${encodeURIComponent(plate)}`, {
         method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }),
       });
       if (!r.ok) { alert((await r.json().catch(() => ({}))).detail || "Saving failed"); return; }
@@ -1447,7 +1730,7 @@
           timer = setTimeout(() => {   // wait briefly: do not load a video on every mouse movement
             const v = document.createElement("video");
             v.muted = true; v.playsInline = true; v.loop = true; v.autoplay = true; v.preload = "auto";
-            v.src = `/clips/${encodeURI(e.clip)}#t=8`;   // ~10 s pre-buffer: start just before the detection
+            v.src = `clips/${encodeURI(e.clip)}#t=8`;   // ~10 s pre-buffer: start just before the detection
             thumb.prepend(v);
           }, 250);
         });
@@ -1467,7 +1750,34 @@
     });
 
     // ---------- interaction ----------
+    // ---------- a face enlarged, with the moment it was seen ----------
+    function openZoom(img) {
+      $("zoomTitle").textContent = img.dataset.title || "Face";
+      $("zoomSub").textContent = img.dataset.sub || "";
+      // the face image of an event is <clip base>.face1.jpg, with a larger <clip base>.face1.view.jpg
+      // next to it (from 0.5.7); the snapshot is <base>.jpg, the clip <base>.mp4
+      const crop = img.dataset.crop || "";
+      const face = $("zoomFace");
+      face.onerror = () => { face.onerror = null; face.src = img.src; };
+      face.src = crop ? `clips/${encodeURI(crop.replace(/\.jpg$/, ".view.jpg"))}` : img.src;
+      const base = crop.replace(/\.face\d+\.jpg$/, "");
+      const ctx = $("zoomCtx"), vid = $("zoomVideo");
+      vid.pause(); vid.removeAttribute("src"); vid.hidden = true;
+      ctx.hidden = !base; $("zoomFoot").hidden = !base;
+      if (base) {
+        ctx.onerror = () => { ctx.hidden = true; };
+        ctx.src = `clips/${encodeURI(base)}.jpg`;
+        $("zoomPlay").onclick = () => {
+          ctx.hidden = true; $("zoomFoot").hidden = true;
+          vid.src = `clips/${encodeURI(base)}.mp4`; vid.hidden = false; vid.play().catch(() => {});
+        };
+      }
+      $("zoomDlg").showModal();
+    }
+    $("zoomDlg").addEventListener("close", () => { const v = $("zoomVideo"); v.pause(); v.removeAttribute("src"); });
     document.addEventListener("click", (ev) => {
+      const zi = ev.target.closest("img[data-zoom]");
+      if (zi) { openZoom(zi); return; }
       if (ev.target.closest("#seenAll")) { markSeen(state.items); renderTimeline(); return; }
       if (ev.target.closest("#selToggle, #selDone")) { state.select = state.select ? null : new Set(); renderTimeline(); return; }
       const sa = ev.target.closest("[data-sel-act]");
@@ -1475,8 +1785,9 @@
       if (ev.target.closest("#nearChip")) { state.near = !state.near; saveFilter(); renderChips(); state.items = []; loadEvents(); return; }
       if (ev.target.closest("#pDelete")) { deleteCurrent(); return; }
       if (ev.target.closest("#openManage")) { renderManage(); $("manageDlg").showModal(); return; }
+      if (ev.target.closest("#openConfig")) { $("manageDlg").close(); openConfig(); return; }
       // opening another dialog from Manage: close Manage first
-      if ($("manageDlg").open && $("manageDlg").contains(ev.target) && ev.target.closest("[data-settings],[data-mask],#openCompare,#openKeys")) $("manageDlg").close();
+      if ($("manageDlg").open && $("manageDlg").contains(ev.target) && ev.target.closest("[data-settings],[data-mask],#openCompare,#openKeys,#openConfig")) $("manageDlg").close();
       if (ev.target.closest("#filterToggle")) {
         const f = document.querySelector(".filters"); f.classList.toggle("open");
         $("filterToggle").setAttribute("aria-expanded", String(f.classList.contains("open")));
@@ -1517,7 +1828,7 @@
       const fp = ev.target.closest("[data-forget-plate]");
       if (fp) {
         if (confirm(`Forget ${fp.dataset.forgetPlate}?`)) {
-          fetch(`/api/plates/${encodeURIComponent(fp.dataset.forgetPlate)}`, { method: "DELETE" })
+          fetch(`api/plates/${encodeURIComponent(fp.dataset.forgetPlate)}`, { method: "DELETE" })
             .then((r) => r.json()).then((d) => { state.plates.known = d.known || {}; renderPlatesList(); renderChips(); renderTimeline(); loadStatus(); });
         }
         return;
@@ -1529,7 +1840,7 @@
       if (ev.target.closest("#openCompare")) { renderCompare(); $("cmpDlg").showModal(); return; }
       if (ev.target.closest("[data-close]")) { $("peopleDlg").close(); return; }
       const del = ev.target.closest("[data-del]");
-      if (del) { const [n, id] = del.dataset.del.split("|"); forget(`/api/faces/${encodeURIComponent(n)}/${id}`); return; }
+      if (del) { const [n, id] = del.dataset.del.split("|"); forget(`api/faces/${encodeURIComponent(n)}/${id}`); return; }
       const ua = ev.target.closest("[data-uassign]");
       if (ua) {
         const sel = document.querySelector(`[data-ugroup="${ua.dataset.uassign}"]`);
@@ -1541,11 +1852,11 @@
       const ud = ev.target.closest("[data-udismiss]");
       if (ud) {
         const g = unknownGroups[Number(ud.dataset.udismiss)];
-        if (g) postUnknown("/api/unknown-faces/dismiss", { ids: g.ids }).then((d) => d && renderPeople().then(loadStatus));
+        if (g) postUnknown("api/unknown-faces/dismiss", { ids: g.ids }).then((d) => d && renderPeople().then(loadStatus));
         return;
       }
       const fg = ev.target.closest("[data-forget]");
-      if (fg) { if (confirm(`Forget ${fg.dataset.forget} and all photos?`)) forget(`/api/faces/${encodeURIComponent(fg.dataset.forget)}`); return; }
+      if (fg) { if (confirm(`Forget ${fg.dataset.forget} and all photos?`)) forget(`api/faces/${encodeURIComponent(fg.dataset.forget)}`); return; }
       if (ev.target === $("peopleDlg")) { $("peopleDlg").close(); return; }
       const cam = ev.target.closest("[data-cam]");
       if (cam) {
@@ -1585,6 +1896,34 @@
     });
 
     // ---------- manage ----------
+    // ---------- configuration file ----------
+    async function openConfig() {
+      const msg = $("configMsg"), text = $("configText");
+      msg.textContent = "Loading…"; text.value = ""; $("configSave").disabled = true;
+      $("configDlg").showModal();
+      const r = await fetch("api/config", { cache: "no-store" });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) { msg.textContent = data.detail || "Not available"; return; }
+      text.value = data.yaml; $("configPath").textContent = `${data.path} · checked before saving; the service then restarts.`;
+      msg.textContent = "All options are listed in config.example.yaml."; $("configSave").disabled = false;
+    }
+    $("configSave").onclick = async () => {
+      const msg = $("configMsg"), btn = $("configSave");
+      btn.disabled = true; msg.textContent = "Checking…";
+      const r = await fetch("api/config", { method: "PUT", headers: { "Content-Type": "application/json" },
+                                            body: JSON.stringify({ yaml: $("configText").value }) });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) { msg.textContent = data.detail || "Not saved"; btn.disabled = false; return; }
+      msg.textContent = "Saved. Restarting…";
+      // wait until the service is back, then reload the page with the new cameras
+      await new Promise((ok) => setTimeout(ok, 3000));
+      for (let i = 0; i < 60; i++) {
+        try { if ((await fetch("api/status", { cache: "no-store" })).ok) { location.reload(); return; } } catch {}
+        await new Promise((ok) => setTimeout(ok, 2000));
+      }
+      msg.textContent = "The service does not come back; check the log.";
+    };
+
     function renderManage() {
       const st = state.status || {}, h = st.health || {}, ai = st.ai || {};
       const row = (k, v) => `<div class="manage-row"><span>${k}</span><b>${v}</b></div>`;
@@ -1605,6 +1944,7 @@
         </div>
         <div class="btns">
           ${ai.state && ai.state !== "off" ? '<button class="btn" id="openCompare">AI comparison</button>' : ""}
+          <button class="btn" id="openConfig">Configuration</button>
           ${state.auth?.enabled ? '<button class="btn" id="openKeys">Passkeys</button>' : ""}
         </div>`;
     }
@@ -1613,7 +1953,7 @@
     async function openClip(rel) {
       let i = state.items.findIndex((e) => e.clip === rel);
       if (i < 0) {
-        try { state.items.unshift(await api(`/clips/${encodeURI(rel.replace(/\.mp4$/, ".json"))}`)); i = 0; } catch { return; }
+        try { state.items.unshift(await api(`clips/${encodeURI(rel.replace(/\.mp4$/, ".json"))}`)); i = 0; } catch { return; }
       }
       openEvent(i);
     }
@@ -1629,7 +1969,7 @@
         state.camera = cam; renderChips(); renderCams(); loadDays();
         // go to the day of that camera's latest recording
         let last;
-        try { last = (await api(`/api/events?camera=${encodeURIComponent(cam)}&limit=1`)).items[0]; } catch {}
+        try { last = (await api(`api/events?camera=${encodeURIComponent(cam)}&limit=1`)).items[0]; } catch {}
         state.day = last ? isoDay(new Date(last.start)) : daysAgo(0);
         $("dayInput").value = state.day; renderDays(); loadSummary();
         state.items = [];
@@ -1640,8 +1980,8 @@
 
     // ---------- start and refresh ----------
     (async () => {
-      try { state.auth = await api("/api/auth/state"); } catch {}
-      await Promise.all([loadFaces(), loadPlates()]);
+      try { state.auth = await api("api/auth/state"); } catch {}
+      await Promise.all([loadFaces(), loadPlates(), loadDoorbell()]);
       await loadStatus();
       renderChips();
       state.day = daysAgo(0); $("dayInput").value = state.day; renderDays();

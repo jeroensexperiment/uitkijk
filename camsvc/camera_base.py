@@ -22,7 +22,7 @@ import numpy as np
 from .config import CameraConfig
 from .detector import Detection, ObjectDetector, draw_detections
 from .events import NIGHT_HOURS, EventRecord, EventStore, clip_paths, unknown_person
-from .faces import FaceGroup, FaceMatch, FaceRecognizer, confirmed_weak, summarize
+from .faces import MIN_FACE_PX, UNKNOWN_QUALITY, FaceGroup, FaceMatch, FaceRecognizer, confirmed_weak, summarize
 from .motion import MotionDetector, build_mask, motion_region, point_masked, zones_at
 from .plates import VISITOR_DAYS, PlateRead, PlateReader, plates_in_text, vote
 from .recorder import RTSP_OPTIONS, MainRecorder
@@ -85,6 +85,59 @@ VERIFY_KEEP_OK = 30.0     # confirmed: do not verify again for this long (while 
 VERIFY_KEEP_BAD = 300.0   # ignore a rejected spot for this long
 
 
+# Playback boxes and the face/plate search areas (HA app additions)
+BOX_HISTORY = 60              # analysed frames kept from before an event (its pre-buffer)
+BOX_MAX = 3000                # at most this many analysed frames with boxes per clip
+HEAD_REGION_MIN = 400         # px of the main-stream image searched for a face, at least ...
+HEAD_REGION_MAX = 640         # ... and at most (more costs CPU and finds no extra faces)
+PARKED_PLATE_TRIES = 2        # attempts to read the plate of a parked car (it is remembered with it)
+
+
+def frac_box(box: tuple[int, int, int, int], shape: tuple[int, int]) -> list[float]:
+    """A box in pixels as fractions (0-1) of a frame of the given (height, width)."""
+    h, w = shape
+    return [round(box[0] / w, 3), round(box[1] / h, 3), round(box[2] / w, 3), round(box[3] / h, 3)]
+
+
+def head_region(box: tuple[int, int, int, int], sx: float, sy: float,
+                shape: tuple[int, int]) -> tuple[int, int, int, int]:
+    """Where to look for the face of a person found on the sub stream, in the main-stream image
+    (scale sx, sy; shape = its height, width). A square around the head of at least
+    HEAD_REGION_MIN px: the main-stream image is taken a moment later than the detection, so a
+    walking or cycling person has moved on a little."""
+    x1, y1, x2, y2 = box
+    bw, bh = (x2 - x1) * sx, (y2 - y1) * sy
+    cx, cy = (x1 + x2) / 2 * sx, y1 * sy + 0.15 * bh       # the head: top centre of the person
+    side = min(max(HEAD_REGION_MIN, 2.0 * bw, 0.9 * bh), HEAD_REGION_MAX)
+    h, w = shape
+    left = int(min(max(0, cx - side / 2), max(0, w - side)))
+    top = int(min(max(0, cy - side * 0.4), max(0, h - side)))
+    return left, top, int(min(w, left + side)), int(min(h, top + side))
+
+
+def face_size_estimate(box: tuple[int, int, int, int], sub_shape: tuple[int, int],
+                       main_shape: tuple[int, int]) -> float:
+    """Rough size in px of the face of a person (box on the sub stream) on the main-stream image:
+    about a seventh of a whole body, or a third of the width (also when only the upper body is
+    in view, e.g. behind a hedge)."""
+    x1, y1, x2, y2 = box
+    sy, sx = main_shape[0] / sub_shape[0], main_shape[1] / sub_shape[1]
+    return max((y2 - y1) * sy / 7, (x2 - x1) * sx / 3)
+
+
+def boxes_timeline(entries: list, clip_start: float, duration: float, marks: list | None = None) -> dict:
+    """The boxes of an event for playback: times in seconds from the start of the clip (which
+    begins with the pre-buffer). Stored next to the clip as <clip>.boxes.
+    marks: what was read inside a box, (time, "plate" | "face", text, [x1, y1, x2, y2]), so the
+    player can put the plate or the name on the right box."""
+    def keep(t: float) -> bool:
+        return -0.5 <= t - clip_start <= duration + 0.5
+    frames = [[round(t - clip_start, 2), boxes] for t, boxes in entries if keep(t)]
+    out = {"version": 2, "frames": frames}
+    if marks:
+        out["marks"] = [[round(t - clip_start, 2), kind, text, box] for t, kind, text, box in marks if keep(t)]
+    return out
+
 def iou(a: tuple[int, int, int, int], b: tuple[int, int, int, int]) -> float:
     ix = max(0, min(a[2], b[2]) - max(a[0], b[0]))
     iy = max(0, min(a[3], b[3]) - max(a[1], b[1]))
@@ -132,6 +185,8 @@ class Track:
     box: tuple[int, int, int, int]
     first_seen: float
     last_seen: float = 0.0
+    plate: str | None = None     # plate read while it stood still (shown on its box in clips)
+    plate_tries: int = 0
 
 
 @dataclass
@@ -166,3 +221,7 @@ class ActiveEvent:
     ai_labels: set[str] = field(default_factory=set)   # labels at the time the AI description was requested
     false_alarm: str | None = None
     external: dict | None = None
+    boxes: list = field(default_factory=list)   # (time.monotonic(), [box, ...]) per analysed frame
+    marks: list = field(default_factory=list)   # (time.monotonic(), "plate"|"face", text, box) read inside a box
+    face_best_size: float = 0.0           # largest estimated face (px) at an attempt so far
+    plated_tracks: set = field(default_factory=set)   # parked cars whose plate is on their box already

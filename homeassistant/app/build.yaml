@@ -1,0 +1,4 @@
+args:
+  # repository and branch (or tag) that the app is built from
+  UITKIJK_REPO: https://github.com/jeroensexperiment/uitkijk.git
+  UITKIJK_REF: main

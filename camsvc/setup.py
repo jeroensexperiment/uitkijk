@@ -23,6 +23,8 @@ import yaml
 from fastapi import Body, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 
+from . import supervisor
+
 log = logging.getLogger(__name__)
 
 WEB_DIR = Path(__file__).parent / "web"
@@ -41,7 +43,8 @@ BRANDS: dict[str, dict] = {
                   "sub": "rtsp://{auth}{ip}:{port}/Streaming/Channels/102"},
     "dahua": {"name": "Dahua / Amcrest / Lorex", "port": 554,
               "main": "rtsp://{auth}{ip}:{port}/cam/realmonitor?channel=1&subtype=0",
-              "sub": "rtsp://{auth}{ip}:{port}/cam/realmonitor?channel=1&subtype=1"},
+              "sub": "rtsp://{auth}{ip}:{port}/cam/realmonitor?channel=1&subtype={sub}",
+              "subs": {"1": "Sub stream 1", "2": "Sub stream 2", "3": "Sub stream 3"}},
     "tapo": {"name": "TP-Link Tapo / VIGI", "port": 554,
              "main": "rtsp://{auth}{ip}:{port}/stream1", "sub": "rtsp://{auth}{ip}:{port}/stream2"},
     "unifi": {"name": "UniFi Protect (RTSP link from Protect)", "port": 7447, "main": "", "sub": ""},
@@ -65,6 +68,11 @@ def camera_urls(cam: dict) -> tuple[str, str | None]:
     user, pw = str(cam.get("username") or ""), str(cam.get("password") or "")
     auth = (f"{urllib.parse.quote(user, safe='')}:{urllib.parse.quote(pw, safe='')}@" if user else "")
     fields = {"auth": auth, "ip": str(cam["ip"]).strip(), "port": int(cam.get("port") or brand["port"])}
+    if brand.get("subs"):
+        # brands with more than one low-quality stream (Dahua): the one chosen in the wizard
+        fields["sub"] = str(cam.get("sub") or next(iter(brand["subs"])))
+        if fields["sub"] not in brand["subs"]:
+            raise ValueError(f"Camera '{cam.get('name', '?')}': unknown low-quality stream")
     return brand["main"].format(**fields), brand["sub"].format(**fields)
 
 
@@ -212,6 +220,8 @@ def create_setup_app(config_path: Path, state_dir: Path, reason: str):
     app = FastAPI(title="Uitkijk setup")
 
     def check(request: Request) -> None:
+        if supervisor.via_ingress(request.client.host if request.client else None):
+            return      # Home Assistant sidebar: HA has already logged the user in
         given = request.headers.get("x-setup-code", "")
         if not hmac.compare_digest(given.strip().upper().encode(), token.encode()):
             raise HTTPException(401, "Setup code is not correct (see the container log)")
@@ -234,9 +244,16 @@ def create_setup_app(config_path: Path, state_dir: Path, reason: str):
     @app.get("/api/setup/info")
     def info(request: Request):
         host = (request.headers.get("host") or "localhost:8080").split(",")[0]
-        return {"reason": reason, "brands": {k: {"name": v["name"], "port": v["port"],
-                                                  "custom": not v["main"]} for k, v in BRANDS.items()},
-                "public_url": f"http://{host}"}
+        if supervisor.in_app():
+            # via the HA sidebar the Host header is HA itself; links must point to this service
+            ip = supervisor.host_ip()
+            host = f"{ip}:{os.environ.get('CAMSVC_PORT', '8080')}" if ip else host
+        return {"reason": reason, "brands": {k: {"name": v["name"], "port": v["port"], "custom": not v["main"],
+                                                  "subs": v.get("subs")} for k, v in BRANDS.items()},
+                "public_url": f"http://{host}",
+                # only via the HA sidebar: it contains the MQTT login of the Mosquitto app
+                "mqtt": supervisor.mqtt_service() if supervisor.via_ingress(
+                    request.client.host if request.client else None) else None}
 
     @app.post("/api/setup/check")
     def check_code(request: Request):
@@ -288,6 +305,11 @@ def create_setup_app(config_path: Path, state_dir: Path, reason: str):
             g.write_text(go2rtc_yaml(cfg))
             g.chmod(0o600)            # contains the camera passwords
             push_go2rtc(cfg["live"]["go2rtc_url"], cfg)
+        try:
+            from .ha_options import save_to_tab
+            save_to_tab(cfg)        # HA app: the new cameras also in the Configuration tab
+        except RuntimeError as exc:
+            log.warning("%s (it is filled at the next start)", exc)
         (state_dir / TOKEN_FILE).unlink(missing_ok=True)
         log.warning("Config saved to %s; restarting in normal mode", config_path)
         # stop a moment later so the response still arrives; Docker/systemd restarts us

@@ -69,3 +69,55 @@ def test_setup_api_needs_code(tmp_path, monkeypatch):
     assert load_config(tmp_path / "config.yaml").cameras[0].name == "hek"
     assert not (tmp_path / "state" / "setup_code").exists()
     assert (tmp_path / "config.yaml").stat().st_mode & 0o077 == 0
+
+
+def test_setup_via_ha_sidebar_needs_no_code(tmp_path, monkeypatch):
+    app = create_setup_app(tmp_path / "config.yaml", tmp_path / "state", "test")
+    monkeypatch.setenv("SUPERVISOR_TOKEN", "x")
+    monkeypatch.setattr("camsvc.supervisor._get", lambda path: {
+        "/services/mqtt": {"host": "core-mosquitto", "port": 1883, "username": "u", "password": "p"},
+        "/network/info": {"interfaces": [{"primary": True, "ipv4": {"address": ["192.168.1.20/24"]}}]},
+    }[path])
+    ingress = TestClient(app, client=("172.30.32.2", 50000))
+    assert ingress.post("/api/setup/check").status_code == 200
+    info = ingress.get("/api/setup/info").json()
+    assert info["mqtt"]["host"] == "core-mosquitto" and info["public_url"] == "http://192.168.1.20:8080"
+    # from the home network the code is still needed and the MQTT login stays hidden
+    lan = TestClient(app)
+    assert lan.post("/api/setup/check").status_code == 401
+    assert lan.get("/api/setup/info").json()["mqtt"] is None
+
+
+def test_dahua_sub_stream_choice():
+    cam = {"name": "oprit", "brand": "dahua", "ip": "10.0.0.5", "username": "admin", "password": "p@ss"}
+    main, sub = camera_urls({**cam, "sub": "2"})
+    assert "subtype=0" in main and sub.endswith("subtype=2") and "admin:p%40ss@" in sub
+    assert camera_urls(cam)[1].endswith("subtype=1")
+    with pytest.raises(ValueError):
+        camera_urls({**cam, "sub": "9"})
+
+
+def test_config_editor(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    from camsvc.api import create_app
+    cfg_file = tmp_path / "config.yaml"
+    cfg_file.write_text("cameras:\n  - name: hek\n    main_url: rtsp://x/1\n")
+    svc = SimpleNamespace(cfg=SimpleNamespace(clips_dir=tmp_path), auth=None, cameras={})
+    app = create_app(svc, cfg_file)
+    monkeypatch.setenv("SUPERVISOR_TOKEN", "x")
+    tab = []
+    monkeypatch.setattr("camsvc.supervisor.set_options", tab.append)
+    monkeypatch.setattr("camsvc.ha_options.OPTIONS_FILE", tmp_path / "options.json")
+    kills = []
+    monkeypatch.setattr("threading.Timer", lambda *a: type("T", (), {"start": lambda s: kills.append(1)})())
+    # from the home network: never (the file holds passwords)
+    assert TestClient(app).get("/api/config").status_code == 403
+    ha = TestClient(app, client=("172.30.32.2", 50000))
+    assert "hek" in ha.get("/api/config").json()["yaml"]
+    bad = ha.put("/api/config", json={"yaml": "cameras:\n  - name: Hek!\n    main_url: rtsp://x/1\n"})
+    assert bad.status_code == 400 and "hek" in cfg_file.read_text() and kills == []
+    good = ha.put("/api/config", json={"yaml": "cameras:\n  - name: poort\n    main_url: rtsp://x/2\n"})
+    assert good.status_code == 200 and "poort" in cfg_file.read_text() and kills == [1]
+    assert svc.restart_requested and (tmp_path / "config.yaml.previous").exists()
+    assert tab[-1]["cameras"][0]["name"] == "poort"   # the Configuration tab follows

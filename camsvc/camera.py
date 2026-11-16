@@ -33,6 +33,7 @@ from .camera_base import (  # noqa: F401 - also for whoever imports them from ca
     STATIONARY_MAX_TRACKS, STATIONARY_PART_RECENT, STATIONARY_REFRESH, STATIONARY_SAVE_EVERY, TRACKED_LABELS,
     TRACK_MIN_MEDIAN, Track, UNKNOWN_PERSON_DELAY, VERIFY_KEEP_BAD, VERIFY_KEEP_OK, VERIFY_LABELS,
     VERIFY_MIN, VERIFY_MIN_NIGHT, Verdict, _RESCAN_SLOT, _RESCAN_WAITING, contained, iou, zoom_score, log,
+    BOX_HISTORY, BOX_MAX, PARKED_PLATE_TRIES, boxes_timeline, face_size_estimate, frac_box, head_region,
 )
 from .camera_faces import FacesMixin
 from .camera_plates import PlatesMixin
@@ -79,6 +80,8 @@ class Camera(FacesMixin, PlatesMixin):
         self.object_active: dict[str, bool] = {lbl: False for lbl in ("person", "vehicle", "animal")}
         self._last_object: dict[str, float] = {lbl: 0.0 for lbl in self.object_active}
         self._hits: dict[str, deque[float]] = {lbl: deque() for lbl in self.object_active}
+        # the last analysed frames, so a new event also gets the boxes from just before it started
+        self._recent_boxes: deque = deque(maxlen=BOX_HISTORY)
         self._tracks: list[Track] = []
         self._tracks_file = state_dir / f"stationary_{cfg.name}.json"
         # parking spot per known plate: a stationary car there means that car is home
@@ -315,6 +318,7 @@ class Camera(FacesMixin, PlatesMixin):
 
     def _sub_loop(self) -> None:
         backoff = 2.0
+        failures = 0
         while not self._stop.is_set():
             try:
                 with self._open_sub() as container:
@@ -322,9 +326,19 @@ class Camera(FacesMixin, PlatesMixin):
                     stream.thread_type = "AUTO"
                     self._set_sub_online(True)
                     backoff = 2.0
+                    failures = 0
                     self._process_frames(container, stream)
             except Exception as exc:  # noqa: BLE001
                 log.warning("[%s] sub stream error: %s", self.name, exc)
+                failures += 1
+                if failures >= 3 and self.sub_url and self.sub_url != self.main_url:
+                    # a sub stream that does not work (disabled on the camera, wrong address):
+                    # detect on the main stream instead of staying offline (until a restart)
+                    log.warning("[%s] sub stream keeps failing; using the main stream for detection",
+                                self.name)
+                    self.sub_url = self.main_url
+                    backoff = 2.0
+                    continue
             self._set_sub_online(False)
             if self._stop.wait(backoff):
                 break
@@ -424,7 +438,7 @@ class Camera(FacesMixin, PlatesMixin):
             detections = self.detector.detect(bgr, labels, min_score)
         else:
             x0, y0, x1, y1 = region
-            detections = [Detection(d.label, d.score, (d.box[0] + x0, d.box[1] + y0, d.box[2] + x0, d.box[3] + y0))
+            detections = [Detection(d.label, d.score, (d.box[0] + x0, d.box[1] + y0, d.box[2] + x0, d.box[3] + y0), d.kind)
                           for d in (self.zoom_detector or self.detector).detect(bgr[y0:y1, x0:x1], labels, min_score)]
             self.stats["zoom"] = self.stats.get("zoom", 0) + 1
         # the lower night threshold is for people only; they go through _verify as doubtful cases
@@ -457,6 +471,7 @@ class Camera(FacesMixin, PlatesMixin):
                       or plausible_shape(d.label, d.box, bgr.shape[1], bgr.shape[0])]
         detections = self._verify(now, detections, bgr.shape[:2])
         with self._lock:
+            seen = detections
             detections = self._drop_stationary(now, detections, labels)
             followed = [d for d in detections if d.label in TRACKED_LABELS]
             tracked = self.tracker.update(now, followed)
@@ -465,6 +480,9 @@ class Camera(FacesMixin, PlatesMixin):
             parked = {id(d) for d, o in zip(followed, tracked)
                       if d.label == "vehicle" and o.direction(*self._frame_size) == "stays put"}
             detections = [d for d in detections if id(d) not in parked]
+            counted = {id(d) for d in detections}
+            self._log_boxes(now, [(d, id(d) not in counted) for d in seen], bgr.shape[:2])
+            self._maybe_parked_plates(now, bgr.shape[:2], [d for d in seen if id(d) not in counted])
             for d, o in zip(followed, tracked):
                 if id(d) not in parked:
                     o.hits = [*o.hits[-7:], (now, d.score)]
@@ -511,6 +529,21 @@ class Camera(FacesMixin, PlatesMixin):
                     self._maybe_plates(now, bgr.shape[:2], cars)
             if self.event is not None:
                 self.event.objects.update({o.id: o for o in tracked})
+
+    def _log_boxes(self, now: float, detections: list[tuple[Detection, bool]],
+                   shape: tuple[int, int]) -> None:
+        """Remember what was detected in this frame, as fractions of the frame (lock already
+        held): [kind, label, score, x1, y1, x2, y2, parked]. Played back as boxes over the clip;
+        parked = standing still, so it did not count for the event. A frame without anything is
+        only noted right after one with boxes, so the boxes disappear at the right moment."""
+        boxes = [[d.kind or d.label, d.label, round(d.score, 2), *frac_box(d.box, shape), int(parked)]
+                 for d, parked in detections]
+        if not boxes and (not self._recent_boxes or not self._recent_boxes[-1][1]):
+            return
+        entry = (now, boxes)
+        self._recent_boxes.append(entry)
+        if self.event is not None and len(self.event.boxes) < BOX_MAX:
+            self.event.boxes.append(entry)
 
     def _publish_counts(self, now: float, cooldown: float) -> None:
         """Number of people and vehicles in view now; parked cars count too (lock already held)."""
@@ -721,6 +754,7 @@ class Camera(FacesMixin, PlatesMixin):
             self.event = ActiveEvent(
                 id=uuid.uuid4().hex[:12], start_wall=datetime.now().astimezone(), start_mono=now,
                 last_trigger=now, label=label, labels={label}, best_score=score, snapshot_jpg=snapshot)
+            self.event.boxes = list(self._recent_boxes)
             self.recorder.start_event(self.event.id)
             self._write_part_meta(self.event)
             log.info("[%s] event started: %s", self.name, label)
@@ -992,6 +1026,11 @@ class Camera(FacesMixin, PlatesMixin):
         # meta and snapshot only go after a successful move: otherwise the next start rescues the clip
         for extra in (f"{ev.id}.meta.json", f"{ev.id}.jpg"):
             (part.parent / extra).unlink(missing_ok=True)
+        clip_start = self.recorder.clip_starts.pop(ev.id, None)
+        if ev.boxes and clip_start is not None:   # the boxes for playing the clip back
+            timeline = boxes_timeline(ev.boxes, clip_start, duration, ev.marks)
+            if timeline["frames"]:
+                mp4.with_suffix(".boxes").write_text(json.dumps(timeline, separators=(",", ":")))
         plates = []
         for plate in dict.fromkeys(r.plate for r in ev.plates):   # every plate once
             best = max((r for r in ev.plates if r.plate == plate), key=lambda r: r.confidence)
@@ -1013,6 +1052,8 @@ class Camera(FacesMixin, PlatesMixin):
         for i, g in enumerate(groups, 1):
             crop = day_dir / f"{base}.face{i}.jpg"
             crop.write_bytes(g.best.crop_jpg)
+            if g.best.view_jpg:             # larger image, for clicking the face on the web page
+                crop.with_suffix(".view.jpg").write_bytes(g.best.view_jpg)
             faces.append({"crop": str(crop.relative_to(self.clips_dir)), "name": g.name,
                           "score": g.score, "quality": g.best.quality})
             ev.face_crops.update({id(m): faces[-1]["crop"] for m in g.members})

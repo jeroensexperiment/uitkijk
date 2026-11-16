@@ -50,6 +50,7 @@ AUTO_MARGIN = 0.15        # ... that clearly belong to one person
 FORGET_SAME = 0.92        # this similar = the same photo (another image of the same person: ~0.5-0.8)
 AUTO_DUPLICATE = 0.85     # already this similar to an existing photo: adds nothing
 UNKNOWN_QUALITY = 0.3     # do not keep worse unknown faces
+VIEW_SIDE = 480           # px of the larger face image shown when clicking a face
 UNKNOWN_MAX = 400
 UNKNOWN_KEEP_DAYS = 30
 ASSIGN_MAX = 8            # this many of the best photos are kept when naming
@@ -81,6 +82,7 @@ class FaceMatch:
     embedding: np.ndarray | None = field(default=None, repr=False)
     norm: float = 0.0         # length of the ArcFace vector before normalising (0 = unknown)
     weak: bool = False        # below MIN_QUALITY, only counts through confirmed_weak
+    view_jpg: bytes | None = field(default=None, repr=False)   # wider, sharper crop, only to look at
 
 
 @dataclass
@@ -126,6 +128,24 @@ def face_quality(face: np.ndarray, aligned: np.ndarray) -> float:
     conf = np.clip((face[14] - 0.8) / 0.2, 0, 1)
     q = (0.3 + 0.7 * size) * (0.3 + 0.7 * sharp) * (0.2 + 0.8 * frontal) * (0.6 + 0.4 * conf)
     return round(float(q), 3)
+
+
+def face_view(bgr: np.ndarray, face: np.ndarray, side: int = VIEW_SIDE) -> bytes | None:
+    """The face with some head and shoulders around it, straight from the (sharp) image, at most
+    `side` px. Only for looking at it larger on the web page; recognition uses the aligned crop."""
+    x, y, w, h = (float(v) for v in face[:4])
+    cx, cy, half = x + w / 2, y + h / 2, max(w, h)            # twice the face size
+    H, W = bgr.shape[:2]
+    x1, y1 = int(max(0, cx - half)), int(max(0, cy - half))
+    x2, y2 = int(min(W, cx + half)), int(min(H, cy + half))
+    if x2 - x1 < 8 or y2 - y1 < 8:
+        return None
+    crop = bgr[y1:y2, x1:x2]
+    scale = side / max(crop.shape[:2])
+    if scale < 1:
+        crop = cv2.resize(crop, (int(crop.shape[1] * scale), int(crop.shape[0] * scale)), interpolation=cv2.INTER_AREA)
+    ok, buf = cv2.imencode(".jpg", crop, [cv2.IMWRITE_JPEG_QUALITY, 93])
+    return buf.tobytes() if ok else None
 
 
 def summarize(matches: list[FaceMatch], group_threshold: float, limit: int = 4) -> list[FaceGroup]:
@@ -467,9 +487,11 @@ class FaceRecognizer:
         return True
 
     # ------------------------------------------------------------------ recognition
-    def analyse(self, bgr: np.ndarray, keep_weak: bool = False) -> list[FaceMatch]:
+    def analyse(self, bgr: np.ndarray, keep_weak: bool = False,
+                too_small: list[int] | None = None) -> list[FaceMatch]:
         """All faces in a (cropped) image, with the best matching name. keep_weak: also
-        side views below MIN_QUALITY when strongly recognised (marked as weak)."""
+        side views below MIN_QUALITY when strongly recognised (marked as weak). Faces that are
+        too small are skipped; their size in pixels is added to `too_small` (for the log)."""
         h, w = bgr.shape[:2]
         scale = min(1.0, DETECT_MAX_SIDE / max(h, w))
         small = cv2.resize(bgr, (int(w * scale), int(h * scale))) if scale < 1 else bgr
@@ -486,6 +508,8 @@ class FaceRecognizer:
             face = face.copy()
             face[:14] /= scale                       # back to coordinates of bgr
             if min(face[2], face[3]) < MIN_FACE_PX:
+                if too_small is not None:
+                    too_small.append(int(min(face[2], face[3])))
                 continue
             with self._lock:
                 aligned = self._sface.alignCrop(bgr, face)
@@ -505,7 +529,7 @@ class FaceRecognizer:
             if not ok:
                 continue
             out.append(FaceMatch(name, score, buf.tobytes(), quality, margin, emb,
-                                 norm if self.backend is ARCFACE else 0.0, weak))
+                                 norm if self.backend is ARCFACE else 0.0, weak, face_view(bgr, face)))
         return out
 
 
@@ -614,6 +638,7 @@ class UnknownFaces:
             out.append({
                 "ids": [ids[i] for i in members],
                 "samples": [ids[i] for i in members[:6]],
+                "crops": [items[ids[i]].get("crop") for i in members[:6]],   # face image in the clip
                 "count": len(members),
                 "first": times[0], "last": times[-1],
                 "cameras": sorted({items[ids[i]]["camera"] for i in members}),

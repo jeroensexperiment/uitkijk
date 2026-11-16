@@ -84,23 +84,35 @@ def _fetch_arcface(dest_dir: Path) -> None:
 
 
 def ensure_models(cfg: "Config") -> None:
-    """Prepare missing models. Log errors, never block startup: without face models everything
-    else runs normally, without the object model only motion detection runs."""
-    model = Path(cfg.model["path"])
-    try:
-        model.parent.mkdir(parents=True, exist_ok=True)
-        bundled = BUNDLED_DIR / model.name
-        if not model.exists() and bundled.exists():
-            shutil.copy2(bundled, model)
-            log.info("Object model %s prepared", model.name)
-    except OSError as exc:
-        log.error("Model folder %s not usable: %s", model.parent, exc)
-        return
-    if not any(c.settings["faces"]["enabled"] for c in cfg.cameras):
-        return
+    """Prepare the object model. Log errors, never block startup: without it only motion detection
+    runs. Face models are fetched in the background by the service (fetch_face_models), so a slow
+    download of ~300 MB does not keep the web page away."""
+    paths = [Path(cfg.model["path"])]
+    if cfg.model.get("fallback_path"):
+        paths.append(Path(cfg.model["fallback_path"]))
+    for model in paths:
+        # OpenVINO: the .xml needs its .bin next to it
+        files = [model, model.with_suffix(".bin")] if model.suffix == ".xml" else [model]
+        try:
+            model.parent.mkdir(parents=True, exist_ok=True)
+            for f in files:
+                bundled = BUNDLED_DIR / f.name
+                # also after an app update with a newer model: the copy follows the image
+                if bundled.exists() and (not f.exists() or _sha(f) != _sha(bundled)):
+                    shutil.copy2(bundled, f)
+                    log.info("Object model %s prepared", f.name)
+        except OSError as exc:
+            log.error("Model folder %s not usable: %s", model.parent, exc)
+            return
+
+
+def fetch_face_models(models_dir: Path) -> bool:
+    """Download the face models that are missing; False (and logged) when that fails."""
     try:
         for name, (url, sha) in FACE_MODELS.items():
-            _fetch(model.parent / name, url, sha)
-        _fetch_arcface(model.parent)
+            _fetch(models_dir / name, url, sha)
+        _fetch_arcface(models_dir)
+        return True
     except (OSError, ValueError, zipfile.BadZipFile) as exc:
         log.error("Downloading face models failed (%s); will retry at the next start", exc)
+        return False

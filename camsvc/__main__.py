@@ -46,7 +46,13 @@ def main() -> None:
                                                            "/etc/camera-service/config.yaml"))
     args = parser.parse_args()
 
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)-7s %(name)s: %(message)s")
+    from .logredact import setup as setup_logging
+    setup_logging()
+    try:
+        from .ha_options import sync
+        sync(Path(args.config))     # HA app: the Configuration tab into config.yaml (no-op elsewhere)
+    except Exception:  # noqa: BLE001 - the tab must never block startup
+        logging.getLogger(__name__).exception("Applying the Configuration tab failed")
     migrate_old_data(Path(args.config))
     try:
         cfg = load_config(args.config)
@@ -70,7 +76,8 @@ def main() -> None:
     svc = Service(cfg)
     svc.start()
 
-    server = uvicorn.Server(uvicorn.Config(create_app(svc), host=cfg.api_host, port=cfg.api_port,
+    app = create_app(svc, Path(args.config))
+    server = uvicorn.Server(uvicorn.Config(app, host=cfg.api_host, port=cfg.api_port,
                                            log_level="warning", access_log=False))
 
     def shutdown(*_):
@@ -85,7 +92,7 @@ def main() -> None:
         # Do not let the interpreter tear down: PyAV/ffmpeg decoder threads may still run while
         # their objects are gone (segfault on stop). Everything has been saved.
         logging.shutdown()
-        os._exit(0)
+        os._exit(3 if getattr(svc, "restart_requested", False) else 0)
 
 
 if __name__ == "__main__":
