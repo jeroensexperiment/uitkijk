@@ -203,6 +203,25 @@
     .rail-zoom { display: flex; justify-content: center; gap: .4rem; padding: .45rem; border-top: 1px solid var(--me-border); }
     .rail-zoom .icon-btn { font-size: 1.1rem; }
     @media (max-width: 760px) { .rail { display: none; } }
+    /* Rewind: 24/7 recording of all cameras at the same moment */
+    dialog.review { width: min(1500px, 100vw - 16px); }
+    .rev-ctl { display: flex; align-items: center; gap: .4rem; flex-wrap: wrap; justify-content: flex-end; }
+    .rev-ctl select { font: inherit; font-size: .82rem; padding: .35rem .45rem; border-radius: var(--me-radius-sm); background: var(--me-surface); color: var(--me-text); border: 1px solid var(--me-border); }
+    .rev-layout { display: flex; min-height: 0; }
+    .rev-main { flex: 1; min-width: 0; display: grid; gap: .5rem; padding: .6rem; align-content: start; }
+    .rev-big video { width: 100%; max-height: calc(100dvh - 300px); background: #000; border-radius: var(--me-radius-sm); }
+    .rev-range { width: 100%; }
+    .rev-thumbs { display: flex; gap: .5rem; overflow-x: auto; }
+    .rev-thumb { position: relative; flex: 0 0 auto; width: 13rem; cursor: pointer; border-radius: var(--me-radius-sm); overflow: hidden; border: 1px solid var(--me-border); background: #000; }
+    .rev-thumb video { width: 100%; aspect-ratio: 16 / 9; max-height: none; display: block; }
+    .rev-cam { position: absolute; left: .4rem; bottom: .3rem; font-size: .75rem; font-weight: 600; color: #fff; text-shadow: 0 1px 2px #000; pointer-events: none; }
+    .rev-none { position: absolute; inset: 0; display: grid; place-items: center; font-size: .78rem; color: var(--me-text-muted); background: var(--me-bg); pointer-events: none; }
+    .rev-big { position: relative; }
+    .rev-big .rev-cam { font-size: .9rem; left: .7rem; bottom: .5rem; }
+    .rail-rec { position: absolute; left: 2.6rem; width: 3px; background: var(--me-border-strong); pointer-events: none; }
+    .rail-now { position: absolute; left: 0; right: 0; height: 2px; background: var(--me-danger); pointer-events: none; z-index: 2; }
+    .rail-now span { position: absolute; right: .3rem; top: -.75rem; font-size: .68rem; font-weight: 700; color: #fff; background: var(--me-danger); border-radius: 999px; padding: 0 .35rem; font-variant-numeric: tabular-nums; }
+    .rev-rail .rail-scroll { cursor: pointer; }
     img[data-zoom] { cursor: zoom-in; }
     .zoom-body { display: grid; justify-items: center; gap: .8rem; padding: 1rem; }
     .zoom-face { width: min(16rem, 70vw); aspect-ratio: 1; object-fit: cover; border-radius: var(--me-radius-card); border: 1px solid var(--me-border-strong); background: var(--me-bg); }
@@ -497,6 +516,7 @@
       <button class="chip" id="pBoxesBtn" aria-pressed="true" title="Show what was detected (boxes) while playing">Detections</button>
       <button class="btn" id="pFalse" title="Nothing to worry about: ignore this spot for this kind of object from now on (N)">Nothing to worry about</button>
       <button class="btn danger" id="pDelete" title="Delete this recording for good (Delete)">Delete</button>
+      <button class="btn" id="pRewind" hidden title="24/7 recording of all cameras, from just before this recording">Rewind from here</button>
       <a class="btn" id="pDownload" download>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11m0 0l-4-4m4 4l4-4M5 20h14"/></svg>Download
       </a>
@@ -568,6 +588,36 @@
       </button>
     </div>
     <iframe class="live-frame" id="liveFrame" title="Live camera view" allow="autoplay; fullscreen"></iframe>
+  </dialog>
+
+  <dialog id="reviewDlg" class="review" aria-labelledby="revTitle">
+    <div class="player-head">
+      <div><h3 id="revTitle">Rewind</h3><div class="muted" id="revTime">–</div></div>
+      <div class="rev-ctl">
+        <button class="btn" id="revBack" title="30 seconds back">−30 s</button>
+        <button class="btn primary" id="revPlay">Pause</button>
+        <button class="btn" id="revFwd" title="30 seconds forward">+30 s</button>
+        <select id="revSpeed" aria-label="Speed"><option value="1">1×</option><option value="2">2×</option><option value="4">4×</option><option value="8">8×</option></select>
+        <button class="btn" id="revNow" title="Back to a minute ago">Now</button>
+        <button class="icon-btn" data-dlg-close="reviewDlg" aria-label="Close">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+      </div>
+    </div>
+    <div class="rev-layout">
+      <div class="rev-main">
+        <div class="rev-big" id="revBig"></div>
+        <input type="range" id="revRange" class="rev-range" min="0" max="86400" step="1" aria-label="Time">
+        <div class="rev-thumbs" id="revThumbs"></div>
+      </div>
+      <aside class="rail rev-rail" aria-label="Timeline: the last 24 hours">
+        <div class="rail-scroll" id="revScroll"><div class="rail-inner" id="revInner"></div></div>
+        <div class="rail-zoom">
+          <button class="icon-btn" id="revOut" title="Zoom out" aria-label="Zoom out">−</button>
+          <button class="icon-btn" id="revIn" title="Zoom in" aria-label="Zoom in">+</button>
+        </div>
+      </aside>
+    </div>
   </dialog>
 
   <dialog id="zoomDlg" aria-labelledby="zoomTitle">
@@ -797,6 +847,7 @@
         $("stats").innerHTML = `
           <span class="pill"><span class="dot ${cams.every((c) => c.online) ? "on" : "off"}"></span><b>${cams.filter((c) => c.online).length}/${cams.length}</b> online</span>
           ${usagePill(st.usage)}
+          ${st.continuous ? `<button class="pill link" id="openRewind" title="24/7 recording: scroll back through all cameras at once">Rewind</button>` : ""}
           ${state.faces.enabled ? `<button class="pill link" id="openPeople">Faces <b>${Object.keys(state.faces.people).length}</b>${state.faces.unknown ? ` <span class="muted">· ${state.faces.unknown} unknown</span>` : ""}</button>` : ""}
           ${state.plates.enabled ? `<button class="pill link" id="openPlates">Plates <b>${Object.keys(state.plates.known).length}</b></button>` : ""}
           <button class="pill link" id="openManage" title="Settings, masks, storage and server">Manage${
@@ -1106,6 +1157,7 @@
       renderPlates(e);
       renderAi(e);
       loadBoxes(e);
+      $("pRewind").hidden = !state.status?.continuous;
       showRail();
       $("pPrev").disabled = i <= 0;
       $("pNext").disabled = i >= state.items.length - 1 && state.items.length >= state.total;
@@ -1117,6 +1169,175 @@
       if (i >= state.items.length && state.items.length < state.total) await loadEvents(false);
       openEvent(i);
     }
+    // ---------- Rewind: 24/7 recording of all cameras at the same moment ----------
+    // One clock (rev.t) drives every camera; each second the videos are put back on it (a new
+    // 5-minute segment, a seek, or after scrolling). Click a small camera to make it the big one.
+    const REV_SPAN = 24 * 3600e3;
+    const rev = { t: 0, from: 0, to: 0, playing: true, speed: 1, main: null, segs: {}, events: [],
+                  vids: {}, raf: 0, last: 0, lastSync: 0, pxPerHour: 60, loaded: 0 };
+    try { rev.pxPerHour = Number(localStorage.getItem("camsvc-rev-zoom")) || 60; } catch {}
+    const segStart = (s) => s._t ?? (s._t = new Date(s.start).getTime());
+    function segAt(cam, t) {
+      return (rev.segs[cam] || []).find((s) => segStart(s) <= t && t < segStart(s) + s.seconds * 1000) || null;
+    }
+    async function loadRewind() {
+      rev.to = Date.now(); rev.from = rev.to - REV_SPAN;
+      const p = new URLSearchParams({ start: new Date(rev.from).toISOString(), end: new Date(rev.to).toISOString() });
+      try { rev.segs = (await api(`api/continuous?${p}`)).cameras || {}; } catch { rev.segs = {}; }
+      try { rev.events = (await api("api/events?limit=200")).items || []; } catch { rev.events = []; }
+      rev.loaded = Date.now();
+      $("revRange").max = String(Math.round(REV_SPAN / 1000));
+    }
+    function revVideo(cam) {
+      if (rev.vids[cam]) return rev.vids[cam];
+      const box = document.createElement("div");
+      box.className = "rev-thumb";
+      box.dataset.revCam = cam;
+      box.innerHTML = `<video muted playsinline preload="auto"></video><span class="rev-none" hidden>No recording</span><span class="rev-cam">${esc(camName(cam))}</span>`;
+      return (rev.vids[cam] = box);
+    }
+    function layoutRewind() {
+      const cams = state.cams.map((c) => c.name);
+      if (!rev.main || !cams.includes(rev.main)) rev.main = cams[0];
+      for (const c of cams) revVideo(c).classList.toggle("rev-thumb", c !== rev.main);
+      $("revBig").replaceChildren(revVideo(rev.main));
+      $("revThumbs").replaceChildren(...cams.filter((c) => c !== rev.main).map(revVideo));
+      syncRewind(true);
+    }
+    // put every camera on rev.t; force = also re-seek when only a little off
+    function syncRewind(force = false) {
+      for (const [cam, box] of Object.entries(rev.vids)) {
+        const v = box.querySelector("video"), none = box.querySelector(".rev-none");
+        const s = segAt(cam, rev.t);
+        none.hidden = !!s;
+        if (!s) { if (!v.paused) v.pause(); continue; }
+        const offset = (rev.t - segStart(s)) / 1000;
+        if (v.dataset.clip !== s.clip) {
+          v.dataset.clip = s.clip;
+          v.onloadedmetadata = () => {
+            try { v.currentTime = (rev.t - segStart(s)) / 1000; } catch {}
+            v.playbackRate = rev.speed;
+            if (rev.playing) v.play().catch(() => {});
+          };
+          v.src = `clips/${encodeURI(s.clip)}`;
+          continue;
+        }
+        if (force || Math.abs(v.currentTime - offset) > 1.5) {
+          try { v.currentTime = offset; } catch {}
+        }
+        v.playbackRate = rev.speed;
+        if (rev.playing && v.paused) v.play().catch(() => {});
+        if (!rev.playing && !v.paused) v.pause();
+      }
+      showRewindTime();
+    }
+    function showRewindTime() {
+      const d = new Date(rev.t);
+      $("revTime").textContent = `${dayLabel(d)}, ${fmtTimeS(d.toISOString())}`;
+      $("revRange").value = String(Math.round((rev.t - rev.from) / 1000));
+      const now = $("revInner").querySelector(".rail-now");
+      if (now) {
+        now.style.top = `${((rev.to - rev.t) / 3600e3 * rev.pxPerHour).toFixed(1)}px`;
+        now.firstChild.textContent = fmtTimeS(d.toISOString());
+      }
+    }
+    function tickRewind(ts) {
+      rev.raf = 0;
+      if (!$("reviewDlg").open) return;
+      if (rev.playing && rev.last) rev.t = Math.min(Date.now() - 5000, rev.t + (ts - rev.last) * rev.speed);
+      rev.last = ts;
+      if (ts - rev.lastSync > 1000) { rev.lastSync = ts; syncRewind(); } else showRewindTime();
+      rev.raf = requestAnimationFrame(tickRewind);
+    }
+    function renderRewindRail() {
+      const px = rev.pxPerHour, y = (t) => (rev.to - t) / 3600e3 * px;
+      const inner = $("revInner");
+      inner.style.height = `${Math.ceil(y(rev.from) + 30)}px`;
+      const step = (px >= 360 ? 0.25 : px >= 180 ? 0.5 : px >= 60 ? 1 : px >= 30 ? 2 : 4) * 3600e3;
+      let html = "";
+      const first = new Date(rev.to), stepMin = step / 60000;
+      first.setHours(0, Math.floor((first.getHours() * 60 + first.getMinutes()) / stepMin) * stepMin, 0, 0);
+      for (let t = first.getTime(); t > rev.from; t -= step) {
+        const d = new Date(t), midnight = d.getHours() === 0 && d.getMinutes() === 0;
+        html += `<div class="rail-tick${midnight ? " day" : ""}" style="top:${y(t).toFixed(1)}px">${midnight ? esc(dayLabel(d)) : fmtTime(d.toISOString())}</div>`;
+      }
+      // a thin line where there is recording (any camera)
+      const spans = Object.values(rev.segs).flat()
+        .map((s) => [segStart(s), segStart(s) + s.seconds * 1000]).sort((a, b) => a[0] - b[0]);
+      const merged = [];
+      for (const [a, b] of spans) {
+        const last = merged[merged.length - 1];
+        if (last && a <= last[1] + 2000) last[1] = Math.max(last[1], b);
+        else merged.push([a, b]);
+      }
+      for (const [a, b] of merged) {
+        html += `<div class="rail-rec" style="top:${y(b).toFixed(1)}px;height:${Math.max(2, y(a) - y(b)).toFixed(1)}px"></div>`;
+      }
+      for (const e of rev.events) {
+        const t0 = new Date(e.start).getTime(), t1 = evEnd(e);
+        if (t1 < rev.from) continue;
+        const l = LABELS[e.label] || LABELS.motion;
+        const tip = `${fmtTime(e.start)} · ${l.name} · ${camName(e.camera)}`;
+        html += `<div class="rail-ev${e.label === "motion" ? " minor" : ""}" title="${esc(tip)}"
+          style="top:${y(t1).toFixed(1)}px;height:${Math.max(4, y(t0) - y(t1)).toFixed(1)}px;background:${l.color};pointer-events:none"></div>`;
+      }
+      html += `<div class="rail-now"><span></span></div>`;
+      inner.innerHTML = html;
+      showRewindTime();
+    }
+    function rewindTo(t, scroll = false) {
+      rev.t = Math.max(rev.from, Math.min(Date.now() - 5000, t));
+      syncRewind(true);
+      if (scroll) {
+        const s = $("revScroll");
+        s.scrollTop = (rev.to - rev.t) / 3600e3 * rev.pxPerHour - s.clientHeight / 2;
+      }
+    }
+    async function openRewind(at) {
+      if (Date.now() - rev.loaded > 60000 || !Object.keys(rev.segs).length) await loadRewind();
+      rev.t = at || Date.now() - 60000;
+      rev.playing = true;
+      $("revPlay").textContent = "Pause";
+      if (!$("reviewDlg").open) $("reviewDlg").showModal();
+      layoutRewind();
+      renderRewindRail();
+      rewindTo(rev.t, true);
+      if (!rev.raf) { rev.last = 0; rev.raf = requestAnimationFrame(tickRewind); }
+    }
+    $("reviewDlg").addEventListener("close", () => {
+      for (const box of Object.values(rev.vids)) {
+        const v = box.querySelector("video");
+        v.pause(); v.removeAttribute("src"); v.dataset.clip = ""; v.load();
+      }
+    });
+    $("revPlay").addEventListener("click", () => {
+      rev.playing = !rev.playing;
+      $("revPlay").textContent = rev.playing ? "Pause" : "Play";
+      syncRewind();
+    });
+    $("revBack").addEventListener("click", () => rewindTo(rev.t - 30000));
+    $("revFwd").addEventListener("click", () => rewindTo(rev.t + 30000));
+    $("revNow").addEventListener("click", async () => {
+      await loadRewind(); renderRewindRail(); rewindTo(Date.now() - 60000, true);
+    });
+    $("revSpeed").addEventListener("change", (ev) => { rev.speed = Number(ev.target.value) || 1; syncRewind(); });
+    $("revRange").addEventListener("input", (ev) => rewindTo(rev.from + Number(ev.target.value) * 1000));
+    $("revThumbs").addEventListener("click", (ev) => {
+      const b = ev.target.closest("[data-rev-cam]");
+      if (b) { rev.main = b.dataset.revCam; layoutRewind(); }
+    });
+    $("revScroll").addEventListener("click", (ev) => {
+      const s = $("revScroll"), r = s.getBoundingClientRect();
+      rewindTo(rev.to - (ev.clientY - r.top + s.scrollTop) / rev.pxPerHour * 3600e3);
+    });
+    function zoomRewind(f) {
+      rev.pxPerHour = Math.min(960, Math.max(15, rev.pxPerHour * f));
+      try { localStorage.setItem("camsvc-rev-zoom", String(rev.pxPerHour)); } catch {}
+      renderRewindRail();
+      rewindTo(rev.t, true);
+    }
+    $("revIn").addEventListener("click", () => zoomRewind(2));
+    $("revOut").addEventListener("click", () => zoomRewind(0.5));
     // ---------- timeline beside the player ----------
     // The recordings with the same filter as the list, as bars on a time axis (newest at the top),
     // so you can scroll back and click an earlier one, like the review timeline in Frigate.
@@ -1777,6 +1998,12 @@
     }
     $("zoomDlg").addEventListener("close", () => { const v = $("zoomVideo"); v.pause(); v.removeAttribute("src"); });
     document.addEventListener("click", (ev) => {
+      if (ev.target.closest("#openRewind")) { openRewind(); return; }
+      if (ev.target.closest("#pRewind")) {
+        const e = state.items[state.current];
+        if (e) { closePlayer(); openRewind(new Date(e.start).getTime() - 10000); }
+        return;
+      }
       const aiBtn = ev.target.closest("[data-ai-on]");
       if (aiBtn) { switchAi(aiBtn.dataset.aiOn === "1"); return; }
       const zi = ev.target.closest("img[data-zoom]");

@@ -183,6 +183,8 @@ class Config:
     ai: dict[str, Any] = field(default_factory=dict)   # descriptions by a local vision model
     auth: dict[str, Any] = field(default_factory=dict)  # passkey login: enabled, rp_id, origin, session_days
     log_level: str = "INFO"
+    continuous_days: float = 0.0    # 24/7 recording kept this many days (0 = off)
+    continuous_gb: float = 100.0    # and at most this much space
 
 
 def _deep_merge(base: dict, override: dict) -> dict:
@@ -295,6 +297,8 @@ def load_config(path: str | Path) -> Config:
         log_level=str(raw.get("log_level", "INFO")).upper(),
         go2rtc_url=str((raw.get("live") or {}).get("go2rtc_url") or "").rstrip("/") or None,
         archive=_archive(storage.get("archive")),
+        continuous_days=float(storage.get("continuous_days", 0) or 0),
+        continuous_gb=float(storage.get("continuous_gb", 100) or 100),
         summary_time=str(raw.get("summary_time", "22:00") or ""),
         ai=_load_ai(raw.get("ai")),
         auth=_load_auth(raw.get("auth")),

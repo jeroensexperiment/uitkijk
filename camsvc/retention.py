@@ -18,7 +18,7 @@ def _event_groups(clips_dir: Path) -> list[tuple[float, list[Path]]]:
     """All events as (mtime, [files]); mp4/jpg/json with the same name belong together."""
     groups: dict[Path, list[Path]] = {}
     for f in clips_dir.rglob("*"):
-        if f.is_file() and f.suffix in EXTS:
+        if f.is_file() and f.suffix in EXTS and ".continuous" not in f.parts:
             groups.setdefault(f.with_suffix(""), []).append(f)
     out = []
     for files in groups.values():
@@ -88,7 +88,8 @@ def cleanup(clips_dir: Path, max_days: float, max_gb: float,
         removed += 1
 
     # remove empty day folders
-    for d in sorted((p for p in clips_dir.rglob("*") if p.is_dir() and ".parts" not in p.parts),
+    for d in sorted((p for p in clips_dir.rglob("*") if p.is_dir() and ".parts" not in p.parts
+                     and ".continuous" not in p.parts),
                     reverse=True):
         try:
             d.rmdir()

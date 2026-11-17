@@ -39,3 +39,13 @@ configuration:
     description: >-
       Het vision-model in Ollama (eerst op de pc: ollama pull qwen3-vl:4b-instruct). Werkt met een
       grafische kaart met ongeveer 4 GB of meer.
+  continuous_days:
+    name: Doorlopend opnemen (dagen)
+    description: >-
+      0 = uit. Anders neemt elke camera 24 uur per dag op (alleen beeld, zonder geluid, in blokken van
+      5 minuten) en kun je onder "Rewind" op de Uitkijk-pagina alle camera's tegelijk terugspoelen, bv.
+      om te zien wie aan je auto heeft gezeten. Kost vrijwel geen CPU, wel schijfruimte: bij 4 MP
+      ongeveer 20-45 GB per camera per dag.
+  continuous_gb:
+    name: Doorlopend opnemen (max. GB)
+    description: Daarboven gaan de oudste blokken als eerste weg. Staat los van de gewone opnames.

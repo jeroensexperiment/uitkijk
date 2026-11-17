@@ -105,6 +105,13 @@ class Service:
         self.retention = RetentionWorker(cfg.clips_dir, cfg.retention_days, cfg.retention_max_gb,
                                          self._after_cleanup,
                                          days_by_label=cfg.retention_days_by_label)
+        self.continuous = None
+        if cfg.continuous_days > 0:
+            from .continuous import ContinuousCleanup, ContinuousWriter
+            for cam in self.cameras.values():
+                cam.recorder.continuous = ContinuousWriter(cfg.clips_dir, cam.name)
+            self.continuous = ContinuousCleanup(cfg.clips_dir, cfg.continuous_days, cfg.continuous_gb)
+            log.info("Continuous recording on: %g day(s), at most %g GB", cfg.continuous_days, cfg.continuous_gb)
         self.archive = None
         if cfg.archive:
             a = cfg.archive
@@ -408,6 +415,8 @@ class Service:
             self.mqtt.start([c.cfg for c in self.cameras.values()], self._on_switch, self._state,
                             self._on_trigger)
         self.retention.start()
+        if self.continuous:
+            self.continuous.start()
         if self.archive:
             self.archive.start()
         self._stop_evt = threading.Event()
@@ -536,6 +545,8 @@ class Service:
         for cam in self.cameras.values():
             cam.stop()
         self.retention.stop()
+        if self.continuous:
+            self.continuous.stop()
         if self.archive:
             self.archive.stop()
         if self.ai:

@@ -527,6 +527,22 @@ def create_app(svc: "Service", config_path: Path | None = None) -> FastAPI:
             except Exception:  # noqa: BLE001 - browser already gone (window closed)
                 pass
 
+    @app.get("/api/continuous")
+    def continuous(start: str, end: str):
+        """24/7 recording: the segments of every camera between start and end (ISO times), to
+        scroll back through all cameras at once."""
+        from datetime import datetime
+        from .continuous import segments
+        try:
+            t0 = datetime.fromisoformat(start).astimezone().replace(tzinfo=None)
+            t1 = datetime.fromisoformat(end).astimezone().replace(tzinfo=None)
+        except ValueError as exc:
+            raise HTTPException(400, "start and end as ISO times") from exc
+        if t1 <= t0 or (t1 - t0).total_seconds() > 3 * 86400:
+            raise HTTPException(400, "end after start, at most 3 days")
+        return {"enabled": svc.cfg.continuous_days > 0,
+                "cameras": {name: segments(svc.cfg.clips_dir, name, t0, t1) for name in svc.cameras}}
+
     @app.post("/api/ai")
     def ai_switch(payload: dict = Body(...)):
         """AI descriptions on or off (no restart; remembered)."""
@@ -545,6 +561,7 @@ def create_app(svc: "Service", config_path: Path | None = None) -> FastAPI:
                         "archive": svc.archive_status()},
             "detector": getattr(svc.detector, "device", None),
             "usage": svc.usage.sample(svc.detector) if getattr(svc, "usage", None) else None,
+            "continuous": getattr(svc.cfg, "continuous_days", 0) > 0,
             "ai": svc.ai.status() if svc.ai else {"state": "off"},
             "health": svc.health_snapshot(),
             "cameras": [c.status() for c in svc.cameras.values()],

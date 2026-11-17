@@ -39,3 +39,12 @@ configuration:
     description: >-
       The vision model in Ollama (on the PC first: ollama pull qwen3-vl:4b-instruct). Needs a graphics
       card with about 4 GB or more.
+  continuous_days:
+    name: Continuous recording (days)
+    description: >-
+      0 = off. Otherwise every camera records 24 hours a day (video only, no sound, in 5-minute blocks)
+      and "Rewind" on the Uitkijk page scrolls back through all cameras at once, e.g. to see who
+      touched your car. Costs next to no CPU, but disk space: at 4 MP about 20-45 GB per camera per day.
+  continuous_gb:
+    name: Continuous recording (max. GB)
+    description: Above this the oldest blocks go first. Separate from the event recordings.

@@ -76,6 +76,10 @@ def options_to_config(opts: dict, existing: dict, mqtt: dict | None, public_url:
     storage["state_dir"] = os.environ.get("CAMSVC_STATE", storage.get("state_dir", "/data/state"))
     storage["retention_days"] = float(st.get("retention_days", storage.get("retention_days", 7)))
     storage["max_gb"] = float(st.get("max_gb", storage.get("max_gb", 50)))
+    # 24/7 recording (Rewind): top-level options, so an update fills in the default for older installs
+    if "continuous_days" in opts:
+        storage["continuous_days"] = float(opts.get("continuous_days") or 0)
+        storage["continuous_gb"] = float(opts.get("continuous_gb") or 100)
     person = float(st.get("person_days", 30))
     storage["retention_days_by_label"] = {**(storage.get("retention_days_by_label") or {}),
                                           "person": person, "doorbell": person}
@@ -192,6 +196,8 @@ def config_to_options(cfg: dict, current: dict | None) -> dict:
         "storage": {"retention_days": max(1, round(float(storage.get("retention_days", 7)))),
                     "person_days": max(1, round(float(labels.get("person", 30)))),
                     "max_gb": max(1, round(float(storage.get("max_gb", 50))))},
+        "continuous_days": max(0, round(float(storage.get("continuous_days", 0) or 0))),
+        "continuous_gb": max(1, round(float(storage.get("continuous_gb", 100) or 100))),
         "log_level": level if level in ("debug", "info", "warning", "error") else "info",
         "detector": current.get("detector") if current.get("detector") in DETECTORS else "auto",
         "ai_url": str(current.get("ai_url") or ""),

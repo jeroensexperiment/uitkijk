@@ -233,6 +233,7 @@ class MainRecorder(threading.Thread):
         self.part_dir = part_dir
         self.on_clip_done = on_clip_done
         self.on_online = on_online or (lambda _ok: None)
+        self.continuous = None   # ContinuousWriter when 24/7 recording is on (set by the camera)
         self._stop_evt = threading.Event()
         self._lock = threading.Lock()
         self._want_event: str | None = None   # event id that should be recording
@@ -351,8 +352,12 @@ class MainRecorder(threading.Thread):
                         bytes_window.popleft()
                     self.bitrate_kbps = sum(s for _, s in bytes_window) * 8 / 5 / 1000
 
+                if self.continuous is not None:
+                    self.continuous.write(streams, video.index, bp)
                 self._handle_event(streams, video.index, bp)
         self._finish_writer()
+        if self.continuous is not None:
+            self.continuous.close()             # a new segment after reconnecting
 
     def _handle_event(self, streams, video_index: int, bp: BufferedPacket | None) -> None:
         with self._lock:
