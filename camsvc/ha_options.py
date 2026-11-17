@@ -92,6 +92,7 @@ def options_to_config(opts: dict, existing: dict, mqtt: dict | None, public_url:
     if public_url and not cfg.get("auth"):
         api.setdefault("public_url", public_url)
     cfg["model"] = model_config(str(opts.get("detector") or "auto"), cfg.get("model") or {})
+    ai_config(cfg, opts)
     if opts.get("live_view", True):
         cfg["live"] = {**(cfg.get("live") or {}),
                        "go2rtc_url": (cfg.get("live") or {}).get("go2rtc_url") or DEFAULT_GO2RTC}
@@ -133,6 +134,29 @@ def model_config(detector: str, existing: dict) -> dict:
     return model
 
 
+AI_MODEL = "qwen3-vl:4b-instruct"
+
+
+def ai_config(cfg: dict, opts: dict) -> None:
+    """AI descriptions through Ollama on a PC in the home network (Configuration tab: ai_url and
+    ai_model). Empty ai_url = off; switching on and off for a while is done on the web page.
+    A wrong address only leaves the AI out (logged), the rest of the tab still applies."""
+    from .config import ai_url_allowed
+    url = str(opts.get("ai_url") or "").strip().rstrip("/")
+    ai = dict(cfg.get("ai") or {})
+    if not url:
+        # set through the tab before (not the loopback tunnel of a hand-made config): off again
+        if ai.get("enabled") and not str(ai.get("base_url", "")).startswith(("http://127.", "http://localhost")):
+            cfg["ai"] = {**ai, "enabled": False}
+        return
+    if not ai_url_allowed(url):
+        log.error("Configuration tab: ai_url %s is not used. It must look like http://192.168.1.20:11434 "
+                  "(a computer on the home network)", url)
+        return
+    cfg["ai"] = {**ai, "enabled": True, "base_url": url,
+                 "model": str(opts.get("ai_model") or AI_MODEL).strip()}
+
+
 def config_to_options(cfg: dict, current: dict | None) -> dict:
     """The tab from config.yaml. A camera entered with brand and IP stays that way when its
     addresses did not change; otherwise it becomes 'other' with the full RTSP addresses."""
@@ -170,6 +194,8 @@ def config_to_options(cfg: dict, current: dict | None) -> dict:
                     "max_gb": max(1, round(float(storage.get("max_gb", 50))))},
         "log_level": level if level in ("debug", "info", "warning", "error") else "info",
         "detector": current.get("detector") if current.get("detector") in DETECTORS else "auto",
+        "ai_url": str(current.get("ai_url") or ""),
+        "ai_model": str(current.get("ai_model") or AI_MODEL),
     }
 
 

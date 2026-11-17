@@ -527,6 +527,14 @@ def create_app(svc: "Service", config_path: Path | None = None) -> FastAPI:
             except Exception:  # noqa: BLE001 - browser already gone (window closed)
                 pass
 
+    @app.post("/api/ai")
+    def ai_switch(payload: dict = Body(...)):
+        """AI descriptions on or off (no restart; remembered)."""
+        from .service import set_ai_on
+        if not set_ai_on(svc, bool(payload.get("on"))):
+            raise HTTPException(404, "No AI server configured (Configuration tab: ai_url)")
+        return svc.ai.status()
+
     @app.get("/api/status")
     def status():
         return {

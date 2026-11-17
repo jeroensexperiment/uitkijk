@@ -320,12 +320,13 @@ class AiDescriber(threading.Thread):
         self._failures = 0
         self._breaker_until = 0.0
         self.state = "starting"                       # ready / unavailable / model_missing / breaker
+        self.paused = False      # switched off on the web page: no images go out (saves the AI PC power)
         self.stats = {"ok": 0, "skipped": 0, "expired": 0, "invalid_response": 0,
                       "unavailable": 0, "last_ms": None, "last_error": None}
 
     # --- called by cameras -------------------------------------------------
     def wants(self, camera: str, label: str) -> bool:
-        if label not in self.cfg["labels"] or self.state in ("model_missing", "breaker"):
+        if self.paused or label not in self.cfg["labels"] or self.state in ("model_missing", "breaker"):
             return False
         last = self._last_camera.get(camera)
         return last is None or self.clock() - last >= float(self.cfg["camera_interval"])
@@ -346,13 +347,27 @@ class AiDescriber(threading.Thread):
             self._last_camera[job.camera] = self.clock()
         self._wake.set()
 
+    def set_paused(self, paused: bool) -> None:
+        """Off: nothing is sent any more and waiting images are dropped. On again: check the
+        model first (the AI PC may have been off)."""
+        with self._lock:
+            self.paused = paused
+            if paused:
+                for camera in list(self._order):
+                    self._report(self._pending.pop(camera), {"status": "skipped", "reason": "paused"})
+                self._order.clear()
+            else:
+                self.state = "starting"
+        self._wake.set()
+
     def stop(self) -> None:
         self._stop.set()
         self._wake.set()
 
     def status(self) -> dict:
         with self._lock:
-            return {"state": self.state, "model": self.cfg["model"], "queue": len(self._pending),
+            return {"state": "paused" if self.paused else self.state, "model": self.cfg["model"],
+                    "queue": len(self._pending),
                     **self.stats}
 
     # --- worker -------------------------------------------------------------
@@ -367,7 +382,7 @@ class AiDescriber(threading.Thread):
                         break
                     job = self._pending.pop(self._order.popleft())
                 self._process(job)
-            if self.state in ("unavailable", "starting"):
+            if self.state in ("unavailable", "starting") and not self.paused:
                 self._check_model()                   # bounded, non-inference check
 
     def _check_model(self) -> None:

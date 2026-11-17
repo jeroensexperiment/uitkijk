@@ -28,3 +28,14 @@ configuration:
       de uitsnede rond beweging op 320 px. coral = Google Coral (zuinig, maar duidelijk minder
       nauwkeurig). cpu = het lichte YOLO11n op de processor. Werkt de keuze niet, dan valt het terug
       op de CPU; het verbruik zie je bovenaan de Uitkijk-pagina.
+  ai_url:
+    name: AI-beschrijvingen (Ollama)
+    description: >-
+      Adres van Ollama op een pc in je thuisnetwerk, bijvoorbeeld http://192.168.1.20:11434. Leeg =
+      geen AI-beschrijvingen. Tijdelijk aan en uit zetten doe je op de Uitkijk-pagina onder Manage,
+      zonder herstart. Alleen adressen in je eigen netwerk zijn toegestaan.
+  ai_model:
+    name: AI-model
+    description: >-
+      Het vision-model in Ollama (eerst op de pc: ollama pull qwen3-vl:4b-instruct). Werkt met een
+      grafische kaart met ongeveer 4 GB of meer.

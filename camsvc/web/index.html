@@ -1777,6 +1777,8 @@
     }
     $("zoomDlg").addEventListener("close", () => { const v = $("zoomVideo"); v.pause(); v.removeAttribute("src"); });
     document.addEventListener("click", (ev) => {
+      const aiBtn = ev.target.closest("[data-ai-on]");
+      if (aiBtn) { switchAi(aiBtn.dataset.aiOn === "1"); return; }
       const zi = ev.target.closest("img[data-zoom]");
       if (zi) { openZoom(zi); return; }
       if (ev.target.closest("#seenAll")) { markSeen(state.items); renderTimeline(); return; }
@@ -1925,6 +1927,16 @@
       msg.textContent = "The service does not come back; check the log.";
     };
 
+    const AI_STATE = { starting: "connecting", unavailable: "AI PC not reachable", model_missing: "model not on the AI PC",
+      breaker: "paused after errors" };
+    async function switchAi(on) {
+      try {
+        const r = await fetch("api/ai", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ on }) });
+        if (r.ok) state.status = { ...(state.status || {}), ai: await r.json() };
+      } catch {}
+      renderManage();
+      loadStatus();
+    }
     function renderManage() {
       const st = state.status || {}, h = st.health || {}, ai = st.ai || {};
       const row = (k, v) => `<div class="manage-row"><span>${k}</span><b>${v}</b></div>`;
@@ -1935,7 +1947,9 @@
           ${row("Home Assistant", st.mqtt_connected === null ? "not configured" : dot(st.mqtt_connected) + (st.mqtt_connected ? "connected" : "not connected"))}
           ${h.cpu != null ? row("Server", `CPU ${h.cpu}% · memory ${Math.round(h.memory ?? 0)}% · disk ${h.disk}% full`) : ""}
           ${row("Detection", esc(st.detector || "off"))}
-          ${ai.state && ai.state !== "off" ? row("AI descriptions", dot(ai.state === "ready") + esc(ai.model || "")) : ""}
+          ${ai.state && ai.state !== "off" ? row("AI descriptions", ai.state === "paused"
+            ? `<span class="muted">off</span> <button class="btn" data-ai-on="1">Switch on</button>`
+            : `${dot(ai.state === "ready")}${esc(ai.model || "")}${ai.state === "ready" ? "" : ` <span class="muted">(${esc(AI_STATE[ai.state] || ai.state)})</span>`} <button class="btn" data-ai-on="0">Switch off</button>`) : ""}
         </div>
         <span class="eyebrow">Cameras</span>
         <div class="manage-list">

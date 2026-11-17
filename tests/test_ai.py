@@ -233,10 +233,15 @@ def test_grayscale_detection():
     assert not is_grayscale(color_img())
 
 
-def test_config_defaults_off_and_loopback_only():
+def test_config_defaults_off_and_own_network_only():
     assert _load_ai(None)["enabled"] is False
-    with pytest.raises(ValueError):
-        _load_ai({"base_url": "http://192.168.1.50:11434"})
+    assert _load_ai({"base_url": "http://192.168.1.50:11434"})["base_url"] == "http://192.168.1.50:11434"
+    assert _load_ai({"base_url": "http://127.0.0.1:11435"})
+    for bad in ("http://8.8.8.8:11434", "http://ollama.example.com:11434", "https://192.168.1.50:11434",
+                "http://192.168.1.50", "http://169.254.1.1:11434", "http://user@192.168.1.50:11434",
+                "http://192.168.1.50:11434/x"):
+        with pytest.raises(ValueError):
+            _load_ai({"base_url": bad})
     with pytest.raises(ValueError):
         _load_ai({"queue_max": -1})
     with pytest.raises(ValueError):
@@ -281,3 +286,15 @@ def test_false_alarm_verdict():
     assert false_alarm(["person"], {**ok, "infrared": True})
     assert not false_alarm(["person"], {"status": "ok", "image_quality": "good"})  # old result
     assert not false_alarm(["motion"], ok) and not false_alarm(["person"], None)
+
+
+def test_switched_off_sends_nothing_and_on_checks_again():
+    from camsvc.ai_describe import DEFAULTS, AiDescriber
+    results = []
+    d = AiDescriber({**DEFAULTS, "enabled": True}, lambda *a: results.append(a), client=object())
+    d.state = "ready"
+    assert d.wants("oprit", "person")
+    d.set_paused(True)
+    assert not d.wants("oprit", "person") and d.status()["state"] == "paused"
+    d.set_paused(False)
+    assert d.state == "starting" and d.status()["state"] == "starting"

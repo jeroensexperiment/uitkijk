@@ -229,9 +229,11 @@ def _load_ai(raw: dict | None) -> dict[str, Any]:
         elif isinstance(default, (int, float)):
             if isinstance(ai[key], bool) or not isinstance(ai[key], (int, float)) or ai[key] <= 0:
                 raise ValueError(f"ai.{key} must be a positive number")
-    if not str(ai["base_url"]).startswith(("http://127.0.0.1:", "http://localhost:")):
-        # only through the loopback tunnel: never an arbitrary or external destination
-        raise ValueError("ai.base_url must be a loopback address (the SSH tunnel)")
+    if not ai_url_allowed(str(ai["base_url"])):
+        # never an arbitrary or external destination: the SSH tunnel on this machine, or a
+        # computer on the home network (Ollama on a PC with a graphics card, HA app)
+        raise ValueError("ai.base_url must be http:// with a loopback address (the SSH tunnel) or an "
+                         "IP address on the home network (10.x, 172.16-31.x, 192.168.x)")
     ai["labels"] = [str(x) for x in ai["labels"]]
     return ai
 
@@ -325,3 +327,20 @@ def load_config(path: str | Path) -> Config:
     if not cfg.cameras:
         raise ValueError("No cameras in the config")
     return cfg
+
+
+def ai_url_allowed(url: str) -> bool:
+    """http://<loopback or private IPv4 address>:<port>[/] only: images of the cameras may go to the
+    own network, never to a host name that could point anywhere or to the internet."""
+    import ipaddress
+    from urllib.parse import urlsplit
+    try:
+        u = urlsplit(url)
+        if u.scheme != "http" or not u.port or u.path not in ("", "/") or u.query or u.username:
+            return False
+        if u.hostname == "localhost":
+            return True
+        ip = ipaddress.ip_address(u.hostname or "")
+    except ValueError:
+        return False
+    return ip.version == 4 and (ip.is_loopback or (ip.is_private and not ip.is_link_local))

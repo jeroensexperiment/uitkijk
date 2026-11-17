@@ -81,6 +81,8 @@ class Service:
         if cfg.ai["enabled"]:
             from .ai_describe import AiDescriber
             self.ai = AiDescriber(cfg.ai, self._on_ai_result)
+            if (cfg.state_dir / AI_OFF_FILE).exists():
+                self.ai.set_paused(True)       # switched off on the web page; stays off after a restart
 
         self.cameras: dict[str, Camera] = {}
         for cam_cfg in cfg.cameras:
@@ -546,3 +548,21 @@ class Service:
         if self.mqtt:
             self.mqtt.stop()
         self.health.clean_stop()
+
+
+AI_OFF_FILE = "ai_off"   # in the state folder: AI descriptions switched off on the web page
+
+
+def set_ai_on(svc, on: bool) -> bool:
+    """Switch the AI descriptions on or off without a restart (the AI PC uses power while it
+    describes). Remembered across restarts. False when there is no AI configured."""
+    if svc.ai is None:
+        return False
+    svc.ai.set_paused(not on)
+    flag = svc.cfg.state_dir / AI_OFF_FILE
+    if on:
+        flag.unlink(missing_ok=True)
+    else:
+        flag.write_text("off\n")
+    log.info("AI descriptions switched %s", "on" if on else "off")
+    return True

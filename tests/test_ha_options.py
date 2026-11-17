@@ -81,3 +81,17 @@ def test_detector_choice(tmp_path, monkeypatch):
     with pytest.raises(ValueError):
         ha_options.model_config("tpu", {})
     assert ha_options.config_to_options({}, {"detector": "gpu"})["detector"] == "gpu"
+
+
+def test_ai_from_the_tab():
+    cfg = {}
+    ha_options.ai_config(cfg, {"ai_url": "http://192.168.1.20:11434/", "ai_model": "qwen3-vl:4b-instruct"})
+    assert cfg["ai"] == {"enabled": True, "base_url": "http://192.168.1.20:11434", "model": "qwen3-vl:4b-instruct"}
+    ha_options.ai_config(cfg, {"ai_url": ""})                       # emptied: off again
+    assert cfg["ai"]["enabled"] is False
+    tunnel = {"ai": {"enabled": True, "base_url": "http://127.0.0.1:11435"}}
+    ha_options.ai_config(tunnel, {"ai_url": ""})                    # a hand-made tunnel config stays
+    assert tunnel["ai"]["enabled"] is True
+    bad = {}
+    ha_options.ai_config(bad, {"ai_url": "http://ollama.example.com:11434"})   # not the home network
+    assert "ai" not in bad
