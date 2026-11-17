@@ -325,7 +325,11 @@ class FaceRecognizer:
             return None, 0.0, 0.0
         ranked = sorted(per.values(), reverse=True)
         best = ranked[0]
-        margin = best - (ranked[1] if len(ranked) > 1 else 0.0)
+        # Only one person known: there is nobody to be "clearly more like", so the lead used to be
+        # the whole score and every stranger from 0.26 up got that name (and could be learned as
+        # them). Then the lead is measured from the match threshold instead.
+        second = ranked[1] if len(ranked) > 1 else self.backend.match
+        margin = best - second
         ok = best >= self.backend.match and margin >= self.backend.margin
         return (max(per, key=per.get) if ok else None), round(best, 3), round(margin, 3)
 

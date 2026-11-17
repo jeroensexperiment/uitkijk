@@ -1248,10 +1248,6 @@
       // the picture inside the video element (letterboxed, like object-fit: contain)
       const s = Math.min(w / v.videoWidth, h / v.videoHeight);
       const pw = v.videoWidth * s, ph = v.videoHeight * s, ox = (w - pw) / 2, oy = (h - ph) / 2;
-      const e = boxes.event || {};
-      const persons = items.filter((b) => b[1] === "person").length;
-      // with one person in view and one recognised face in the event, that is who it is
-      const who = persons === 1 ? knownNames(e) : "";
       ctx.font = "600 12px system-ui, sans-serif";
       ctx.lineWidth = 2;
       for (const [kind, label, score, x1, y1, x2, y2, parked] of items) {
@@ -1264,13 +1260,14 @@
         ctx.setLineDash([]);
         let extra = "";
         if (label === "person") {
-          const m = markFor("face", [x1, y1, x2, y2], v.currentTime);
-          extra = m && m !== "unknown face" ? m : who || m;     // a name beats "unknown face"
+          // a name only from a face recognised in this box at this moment, with how alike it was
+          extra = markFor("face", [x1, y1, x2, y2], v.currentTime);
         } else if (label === "vehicle" && kind !== "bicycle") {
           const p = markFor("plate", [x1, y1, x2, y2], null);
           extra = p ? (state.plates.known[p] ? `${state.plates.known[p]} (${p})` : p) : "";
         }
-        const text = `${KIND_NAMES[kind] || kind}${extra ? ` · ${extra}` : ""} ${Math.round(score * 100)}%`;
+        // the % is how sure the model is of the object (a person, a car), not of the name
+        const text = `${KIND_NAMES[kind] || kind} ${Math.round(score * 100)}%${extra ? ` · ${extra}` : ""}`;
         const tw = ctx.measureText(text).width + 8;
         const ty = by >= 18 ? by - 18 : by;
         ctx.fillStyle = color;
@@ -1289,14 +1286,18 @@
     // what was read inside this box: the plate (any time: a car keeps its plate) or the name of
     // the face (within 2 s: people move); the text read most often wins
     function markFor(kind, box, t) {
-      const count = {};
+      const count = {}, alike = {};
       let unnamed = false;            // a face was found here, but nobody recognised (yet)
-      for (const [mt, mk, text, mb] of boxes.marks || []) {
+      for (const [mt, mk, text, mb, sim] of boxes.marks || []) {
         if (mk !== kind || (t != null && Math.abs(mt - t) > 2) || overlap(box, mb) < 0.3) continue;
         if (!text) { unnamed = true; continue; }
         count[text] = (count[text] || 0) + 1;
+        if (sim != null) alike[text] = Math.max(alike[text] || 0, sim);
       }
-      return Object.keys(count).sort((a, b) => count[b] - count[a])[0] || (unnamed ? "unknown face" : "");
+      const best = Object.keys(count).sort((a, b) => count[b] - count[a])[0];
+      if (!best) return unnamed ? "unknown face" : "";
+      // face similarity (ArcFace): about 0.3 = probably, 0.45 and up = sure
+      return alike[best] != null ? `face: ${best} (${alike[best].toFixed(2)})` : best;
     }
     $("pBoxesBtn").addEventListener("click", () => {
       boxes.on = !boxes.on;

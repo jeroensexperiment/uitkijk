@@ -135,7 +135,8 @@ def boxes_timeline(entries: list, clip_start: float, duration: float, marks: lis
     frames = [[round(t - clip_start, 2), boxes] for t, boxes in entries if keep(t)]
     out = {"version": 2, "frames": frames}
     if marks:
-        out["marks"] = [[round(t - clip_start, 2), kind, text, box] for t, kind, text, box in marks if keep(t)]
+        # (time, kind, text, box[, face similarity]): the rest is passed on as it is
+        out["marks"] = [[round(m[0] - clip_start, 2), *m[1:]] for m in marks if keep(m[0])]
     return out
 
 def iou(a: tuple[int, int, int, int], b: tuple[int, int, int, int]) -> float:

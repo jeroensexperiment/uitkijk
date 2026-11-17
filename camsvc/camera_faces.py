@@ -92,8 +92,8 @@ class FacesMixin:
                     continue
                 found = self.faces.analyse(frame[cy1:cy2, cx1:cx2], too_small=too_small)
                 matches += found
-                marks += [(time.monotonic(), "face", m.name or "", frac_box((x1, y1, x2, y2), sub_shape))
-                          for m in found]
+                marks += [(time.monotonic(), "face", m.name or "", frac_box((x1, y1, x2, y2), sub_shape),
+                           round(float(m.score), 2)) for m in found]
             if not matches and boxes:
                 # nothing in the crop (head at the edge of the box, filmed from above):
                 # search the whole sharp frame instead

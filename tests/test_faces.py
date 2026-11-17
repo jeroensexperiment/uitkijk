@@ -207,3 +207,16 @@ def test_face_view_is_a_larger_crop_around_the_face():
     big = np.array([0, 0, 600, 600] + [0] * 11, np.float32)
     view = cv2.imdecode(np.frombuffer(face_view(img, big), np.uint8), cv2.IMREAD_COLOR)
     assert max(view.shape[:2]) == 480                                 # at most VIEW_SIDE
+
+
+def test_one_known_person_is_not_everyone():
+    """With only one person known, a stranger with a low similarity must not get that name."""
+    from camsvc.faces import ARCFACE, FaceRecognizer
+    r = FaceRecognizer.__new__(FaceRecognizer)
+    r.backend = ARCFACE
+    r._per_person = lambda emb: {"Jeroen": 0.30}
+    assert r.identify(None)[0] is None                       # used to be "Jeroen"
+    r._per_person = lambda emb: {"Jeroen": 0.45}
+    assert r.identify(None)[0] == "Jeroen"
+    r._per_person = lambda emb: {"Jeroen": 0.30, "Noor": 0.12}   # two people: the usual lead check
+    assert r.identify(None)[0] == "Jeroen"
