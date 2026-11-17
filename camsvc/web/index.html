@@ -516,7 +516,7 @@
       <button class="chip" id="pBoxesBtn" aria-pressed="true" title="Show what was detected (boxes) while playing">Detections</button>
       <button class="btn" id="pFalse" title="Nothing to worry about: ignore this spot for this kind of object from now on (N)">Nothing to worry about</button>
       <button class="btn danger" id="pDelete" title="Delete this recording for good (Delete)">Delete</button>
-      <button class="btn" id="pRewind" hidden title="24/7 recording of all cameras, from just before this recording">Rewind from here</button>
+      <button class="btn" id="pRewind" title="All cameras at this moment, and scroll back and forth through the recordings">Review from here</button>
       <a class="btn" id="pDownload" download>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11m0 0l-4-4m4 4l4-4M5 20h14"/></svg>Download
       </a>
@@ -592,7 +592,7 @@
 
   <dialog id="reviewDlg" class="review" aria-labelledby="revTitle">
     <div class="player-head">
-      <div><h3 id="revTitle">Rewind</h3><div class="muted" id="revTime">–</div></div>
+      <div><h3 id="revTitle">Review</h3><div class="muted" id="revTime">–</div></div>
       <div class="rev-ctl">
         <button class="btn" id="revBack" title="30 seconds back">−30 s</button>
         <button class="btn primary" id="revPlay">Pause</button>
@@ -847,7 +847,7 @@
         $("stats").innerHTML = `
           <span class="pill"><span class="dot ${cams.every((c) => c.online) ? "on" : "off"}"></span><b>${cams.filter((c) => c.online).length}/${cams.length}</b> online</span>
           ${usagePill(st.usage)}
-          ${st.continuous ? `<button class="pill link" id="openRewind" title="24/7 recording: scroll back through all cameras at once">Rewind</button>` : ""}
+          <button class="pill link" id="openRewind" title="Scroll back through the recordings of all cameras at once">Review</button>
           ${state.faces.enabled ? `<button class="pill link" id="openPeople">Faces <b>${Object.keys(state.faces.people).length}</b>${state.faces.unknown ? ` <span class="muted">· ${state.faces.unknown} unknown</span>` : ""}</button>` : ""}
           ${state.plates.enabled ? `<button class="pill link" id="openPlates">Plates <b>${Object.keys(state.plates.known).length}</b></button>` : ""}
           <button class="pill link" id="openManage" title="Settings, masks, storage and server">Manage${
@@ -1157,7 +1157,6 @@
       renderPlates(e);
       renderAi(e);
       loadBoxes(e);
-      $("pRewind").hidden = !state.status?.continuous;
       showRail();
       $("pPrev").disabled = i <= 0;
       $("pNext").disabled = i >= state.items.length - 1 && state.items.length >= state.total;
@@ -1180,14 +1179,37 @@
     function segAt(cam, t) {
       return (rev.segs[cam] || []).find((s) => segStart(s) <= t && t < segStart(s) + s.seconds * 1000) || null;
     }
+    // The recordings of the events are the material: each clip at its real time (it starts with the
+    // pre-buffer: end - duration). With 24/7 recording switched on, that fills the gaps.
     async function loadRewind() {
       rev.to = Date.now(); rev.from = rev.to - REV_SPAN;
-      const p = new URLSearchParams({ start: new Date(rev.from).toISOString(), end: new Date(rev.to).toISOString() });
-      try { rev.segs = (await api(`api/continuous?${p}`)).cameras || {}; } catch { rev.segs = {}; }
+      rev.segs = {};
       try { rev.events = (await api("api/events?limit=200")).items || []; } catch { rev.events = []; }
+      for (const e of rev.events) {
+        const end = evEnd(e), seconds = e.duration || 0;
+        if (!e.clip || !seconds || end < rev.from) continue;
+        (rev.segs[e.camera] ||= []).push({ start: new Date(end - seconds * 1000).toISOString(), seconds, clip: e.clip, ev: e });
+      }
+      if (state.status?.continuous) {
+        const p = new URLSearchParams({ start: new Date(rev.from).toISOString(), end: new Date(rev.to).toISOString() });
+        try {
+          for (const [cam, list] of Object.entries((await api(`api/continuous?${p}`)).cameras || {})) {
+            (rev.segs[cam] ||= []).push(...list);       // after the events: a clip wins where both exist
+          }
+        } catch {}
+      }
       rev.loaded = Date.now();
       $("revRange").max = String(Math.round(REV_SPAN / 1000));
     }
+    // the next moment after t where any camera has a recording (to skip the empty stretches)
+    function nextRecording(t) {
+      let best = null;
+      for (const list of Object.values(rev.segs)) {
+        for (const s of list) if (segStart(s) > t && (best === null || segStart(s) < best)) best = segStart(s);
+      }
+      return best;
+    }
+    const anyRecording = (t) => Object.keys(rev.segs).some((cam) => segAt(cam, t));
     function revVideo(cam) {
       if (rev.vids[cam]) return rev.vids[cam];
       const box = document.createElement("div");
@@ -1244,7 +1266,15 @@
     function tickRewind(ts) {
       rev.raf = 0;
       if (!$("reviewDlg").open) return;
-      if (rev.playing && rev.last) rev.t = Math.min(Date.now() - 5000, rev.t + (ts - rev.last) * rev.speed);
+      if (rev.playing && rev.last) {
+        rev.t = Math.min(Date.now() - 5000, rev.t + (ts - rev.last) * rev.speed);
+        if (!anyRecording(rev.t)) {
+          // between recordings: on to the next one, or stop after the last
+          const next = nextRecording(rev.t);
+          if (next !== null) { rev.t = next; rev.lastSync = 0; }
+          else { rev.playing = false; $("revPlay").textContent = "Play"; syncRewind(); }
+        }
+      }
       rev.last = ts;
       if (ts - rev.lastSync > 1000) { rev.lastSync = ts; syncRewind(); } else showRewindTime();
       rev.raf = requestAnimationFrame(tickRewind);
@@ -1273,14 +1303,14 @@
       for (const [a, b] of merged) {
         html += `<div class="rail-rec" style="top:${y(b).toFixed(1)}px;height:${Math.max(2, y(a) - y(b)).toFixed(1)}px"></div>`;
       }
-      for (const e of rev.events) {
+      rev.events.forEach((e, k) => {
         const t0 = new Date(e.start).getTime(), t1 = evEnd(e);
-        if (t1 < rev.from) continue;
+        if (t1 < rev.from) return;
         const l = LABELS[e.label] || LABELS.motion;
         const tip = `${fmtTime(e.start)} · ${l.name} · ${camName(e.camera)}`;
-        html += `<div class="rail-ev${e.label === "motion" ? " minor" : ""}" title="${esc(tip)}"
-          style="top:${y(t1).toFixed(1)}px;height:${Math.max(4, y(t0) - y(t1)).toFixed(1)}px;background:${l.color};pointer-events:none"></div>`;
-      }
+        html += `<button class="rail-ev${e.label === "motion" ? " minor" : ""}" data-rev-ev="${k}" title="${esc(tip)}" aria-label="${esc(tip)}"
+          style="top:${y(t1).toFixed(1)}px;height:${Math.max(4, y(t0) - y(t1)).toFixed(1)}px;background:${l.color}"></button>`;
+      });
       html += `<div class="rail-now"><span></span></div>`;
       inner.innerHTML = html;
       showRewindTime();
@@ -1295,7 +1325,9 @@
     }
     async function openRewind(at) {
       if (Date.now() - rev.loaded > 60000 || !Object.keys(rev.segs).length) await loadRewind();
-      rev.t = at || Date.now() - 60000;
+      // without a moment: the start of the latest recording
+      const starts = Object.values(rev.segs).flat().map(segStart);
+      rev.t = at || (starts.length ? Math.max(...starts) + 200 : Date.now() - 60000);
       rev.playing = true;
       $("revPlay").textContent = "Pause";
       if (!$("reviewDlg").open) $("reviewDlg").showModal();
@@ -1327,6 +1359,12 @@
       if (b) { rev.main = b.dataset.revCam; layoutRewind(); }
     });
     $("revScroll").addEventListener("click", (ev) => {
+      const eb = ev.target.closest("[data-rev-ev]");
+      if (eb) {                        // an event: from the start of its recording (with the pre-buffer)
+        const e = rev.events[Number(eb.dataset.revEv)];
+        if (e) { rev.playing = true; $("revPlay").textContent = "Pause"; rewindTo(evEnd(e) - (e.duration || 0) * 1000 + 200); }
+        return;
+      }
       const s = $("revScroll"), r = s.getBoundingClientRect();
       rewindTo(rev.to - (ev.clientY - r.top + s.scrollTop) / rev.pxPerHour * 3600e3);
     });
@@ -2001,7 +2039,7 @@
       if (ev.target.closest("#openRewind")) { openRewind(); return; }
       if (ev.target.closest("#pRewind")) {
         const e = state.items[state.current];
-        if (e) { closePlayer(); openRewind(new Date(e.start).getTime() - 10000); }
+        if (e) { closePlayer(); openRewind(evEnd(e) - (e.duration || 0) * 1000 + 200); }   // the clip start
         return;
       }
       const aiBtn = ev.target.closest("[data-ai-on]");
