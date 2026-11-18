@@ -11,7 +11,7 @@ import logging
 import urllib.error
 import urllib.parse
 import urllib.request
-from datetime import datetime
+from datetime import date, datetime
 
 from fastapi import Body, FastAPI, HTTPException, Request, WebSocket
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
@@ -551,6 +551,19 @@ def create_app(svc: "Service", config_path: Path | None = None) -> FastAPI:
             raise HTTPException(404, "No AI server configured (Configuration tab: ai_url)")
         return svc.ai.status()
 
+    @app.post("/api/ai/describe")
+    def ai_describe_day(payload: dict = Body(default={})):
+        """Describe the recordings of a day (default today) that have no description yet."""
+        if svc.ai is None or getattr(svc, "backfill", None) is None:
+            raise HTTPException(404, "No AI server configured (Configuration tab: ai_url)")
+        if svc.ai.paused:
+            raise HTTPException(409, "AI descriptions are switched off")
+        try:
+            day = date.fromisoformat(payload["day"]) if payload.get("day") else date.today()
+        except ValueError as exc:
+            raise HTTPException(400, "day as YYYY-MM-DD") from exc
+        return svc.backfill.start(day)
+
     @app.get("/api/status")
     def status():
         return {
@@ -562,7 +575,8 @@ def create_app(svc: "Service", config_path: Path | None = None) -> FastAPI:
             "detector": getattr(svc.detector, "device", None),
             "usage": svc.usage.sample(svc.detector) if getattr(svc, "usage", None) else None,
             "continuous": getattr(svc.cfg, "continuous_days", 0) > 0,
-            "ai": svc.ai.status() if svc.ai else {"state": "off"},
+            "ai": ({**svc.ai.status(), "backfill": svc.backfill.status() if getattr(svc, "backfill", None) else None}
+                   if svc.ai else {"state": "off"}),
             "health": svc.health_snapshot(),
             "cameras": [c.status() for c in svc.cameras.values()],
         }

@@ -78,11 +78,14 @@ class Service:
         # without an MQTT server (no Home Assistant) everything works except the HA integration
         self.mqtt = MqttBridge(cfg, self.store) if use_mqtt and cfg.mqtt.get("host") else None
         self.ai = None
+        self.backfill = None
         if cfg.ai["enabled"]:
             from .ai_describe import AiDescriber
             self.ai = AiDescriber(cfg.ai, self._on_ai_result)
             if (cfg.state_dir / AI_OFF_FILE).exists():
                 self.ai.set_paused(True)       # switched off on the web page; stays off after a restart
+            from .ai_backfill import Backfill
+            self.backfill = Backfill(self)     # "describe today's recordings" on the web page
 
         self.cameras: dict[str, Camera] = {}
         for cam_cfg in cfg.cameras:

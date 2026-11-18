@@ -2042,6 +2042,7 @@
         if (e) { closePlayer(); openRewind(evEnd(e) - (e.duration || 0) * 1000 + 200); }   // the clip start
         return;
       }
+      if (ev.target.closest("#aiDescribeToday")) { describeToday(); return; }
       const aiBtn = ev.target.closest("[data-ai-on]");
       if (aiBtn) { switchAi(aiBtn.dataset.aiOn === "1"); return; }
       const zi = ev.target.closest("img[data-zoom]");
@@ -2202,6 +2203,19 @@
       renderManage();
       loadStatus();
     }
+    // describe the recordings of today that have no AI description yet (made before the AI was on)
+    function describeRow(b) {
+      if (b?.running) return `<span class="muted">describing ${b.done + b.failed} / ${b.total}…</span>`;
+      const last = b?.day ? ` <span class="muted">(${b.total ? `${b.done} of ${b.total} described` : "nothing to describe"})</span>` : "";
+      return `<button class="btn" id="aiDescribeToday" title="Have the AI describe today's recordings without a description, so you can search them (e.g. 'parcel', 'van')">Describe today's recordings</button>${last}`;
+    }
+    async function describeToday() {
+      try {
+        const r = await fetch("api/ai/describe", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+        if (r.ok && state.status?.ai) state.status.ai.backfill = await r.json();
+      } catch {}
+      renderManage();
+    }
     function renderManage() {
       const st = state.status || {}, h = st.health || {}, ai = st.ai || {};
       const row = (k, v) => `<div class="manage-row"><span>${k}</span><b>${v}</b></div>`;
@@ -2215,6 +2229,7 @@
           ${ai.state && ai.state !== "off" ? row("AI descriptions", ai.state === "paused"
             ? `<span class="muted">off</span> <button class="btn" data-ai-on="1">Switch on</button>`
             : `${dot(ai.state === "ready")}${esc(ai.model || "")}${ai.state === "ready" ? "" : ` <span class="muted">(${esc(AI_STATE[ai.state] || ai.state)})</span>`} <button class="btn" data-ai-on="0">Switch off</button>`) : ""}
+          ${ai.state && ai.state !== "off" && ai.state !== "paused" ? row("Older recordings", describeRow(ai.backfill)) : ""}
         </div>
         <span class="eyebrow">Cameras</span>
         <div class="manage-list">
